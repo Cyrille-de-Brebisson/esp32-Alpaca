@@ -16,8 +16,9 @@ The only dependencies are:
 
 The code is contained in only 2 files. alpaca.h and alpaca.cpp
 
-
 The code has 100% support for Telescope, Focuser and FilterWheel. The other device types are only partially created. Should you need them please contact me and I will take the time to add them.
+
+The code include nice http based configuration pages for all the devices that you support. And allows for them to be customized.
 
 You will find an example that implements a telescope and a focuser in the main.cpp file.
 
