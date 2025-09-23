@@ -159,12 +159,15 @@ class CMyStr { public:
     }
 };
 
+// copy s into d (size dlen) and make sure that there is a terminal 0 and no overwrite
+static void strncpy2(char *d, char const *s, int dlen) { d[dlen-1]= 0; strncpy(d, s, dlen-1); }
+
 // This is the generic Alpaca device class. All device types inherits from it...
 class CAlpacaDevice { public:
     CAlpacaDevice(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription):id(id), driverInfo(driverInfo), driverVersion(driverVersion)
     { 
-        strncpy(Name, defaultName, sizeof(Name)-1);
-        strncpy(Description, defaultDescription, sizeof(Description)-1);
+        strncpy2(Name, defaultName, sizeof(Name));
+        strncpy2(Description, defaultDescription, sizeof(Description));
         _jsonDesc[0]= 0; // Can not generate here as C/C++ does not allow for virtual function calls in constructor (bad design! Pascal can!)
     }
     CAlpaca *alpaca= nullptr; // back pointer to owner...
@@ -283,14 +286,17 @@ protected:
 // This has never been tested and will not work as I have not written the dispatch!
 class CCoverCalibrator : public CAlpacaDevice { public: CCoverCalibrator(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 2; }
-    virtual TAlpacaErr get_brightness(uint32_t *brightness) = 0;
+    uint32_t brightness= 0;
+    virtual TAlpacaErr get_brightness(uint32_t *brightness) { *brightness= this->brightness; return ALPACA_OK; } // ok in most cases...
+    virtual TAlpacaErr get_calibratorchanging(bool *changing) { *changing= false; return ALPACA_OK; } // brightness is changing... In most cases it is instantaneous...
       enum class CalibratorState { NotPresent, Off, NotReady, Ready, Unknown, Error };
-    virtual TAlpacaErr get_calibratorstate(CalibratorState *state) = 0;
+    virtual TAlpacaErr get_calibratorstate(CalibratorState *state) { *state= CalibratorState::Ready; return ALPACA_OK; } // valid in most casers...
       enum CoverState { NotPresent, Closed, Moving, Open, Unknown, Error };
     virtual TAlpacaErr get_coverstate(CoverState *state) = 0;
+    virtual TAlpacaErr get_covermoving(bool *moving) { CoverState s; TAlpacaErr er= get_coverstate(&s); if (er!=ALPACA_OK) return er; *moving= s==Moving; return ALPACA_OK; } // ok in most cases...
     virtual TAlpacaErr get_maxbrightness(uint32_t *max) = 0;
-    virtual TAlpacaErr turn_calibratoroff() = 0;
-    virtual TAlpacaErr turn_calibratoron(int32_t brightness) = 0;
+    virtual TAlpacaErr calibratoroff() { return calibratoron(0); } // ok for most cases...
+    virtual TAlpacaErr calibratoron(int32_t brightness) { this->brightness= brightness; return ALPACA_OK; } // overide as needed, but do not forget to set brightness!!!
     virtual TAlpacaErr closecover() = 0;
     virtual TAlpacaErr opencover() = 0;
     virtual TAlpacaErr haltcover() = 0;
@@ -338,53 +344,60 @@ protected:
 // This has never been tested and will not work as I have not written the dispatch!
 class CObservingConditions : public CAlpacaDevice { public: CObservingConditions(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 2; }
-    virtual TAlpacaErr get_averageperiod(double *averageperiod) = 0;
-    virtual TAlpacaErr put_averageperiod(double averageperiod) = 0;
-    virtual TAlpacaErr get_cloudcover(double *cloudcover) = 0;
-    virtual TAlpacaErr get_dewpoint(double *dewpoint) = 0;
-    virtual TAlpacaErr get_humidity(double *humidity) = 0;
-    virtual TAlpacaErr get_pressure(double *pressure) = 0;
-    virtual TAlpacaErr get_rainrate(double *rainrate) = 0;
-    virtual TAlpacaErr get_skybrightness(double *skybrightness) = 0;
-    virtual TAlpacaErr get_skyquality(double *skyquality) = 0;
-    virtual TAlpacaErr get_skytemperature(double *skytemperature) = 0;
-    virtual TAlpacaErr get_starfwhm(double *starfwhm) = 0;
-    virtual TAlpacaErr get_temperature(double *temperature) = 0;
-    virtual TAlpacaErr get_winddirection(double *winddirection) = 0;
-    virtual TAlpacaErr get_windgust(double *windgust) = 0;
-    virtual TAlpacaErr get_windspeed(double *windspeed) = 0;
+    virtual TAlpacaErr get_averageperiod(double *averageperiod) { *averageperiod= this->averageperiod; return ALPACA_OK; }
+    virtual TAlpacaErr put_averageperiod(double averageperiod) { this->averageperiod= averageperiod;  return ALPACA_OK; }
+    virtual TAlpacaErr get_cloudcover(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_dewpoint(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_humidity(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_pressure(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_rainrate(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_skybrightness(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_skyquality(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_skytemperature(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_starfwhm(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_temperature(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_winddirection(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_windgust(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_windspeed(double *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
     virtual TAlpacaErr put_refresh() = 0;
-    virtual TAlpacaErr get_sensordescription(const char *sensorname, char *buf, size_t len) = 0;
+    virtual TAlpacaErr get_sensordescription(char const *sensorname, char const *&buf) = 0; // return a pointer to the description for the requested sensor... Typically the specs...
     virtual TAlpacaErr get_timesincelastupdate(double *timesincelastupdate) = 0;
-protected:
+    protected:
+    double averageperiod= 1.0/24.0f/60.0f; // default is 1 minute..
     char const *get_type() override { return "ObservingConditions"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
     void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
 
-// This has never been tested and will not work as I have not written the dispatch!
+// This has never been tested but is implemented
 class CRotator : public CAlpacaDevice { public: CRotator(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 4; }
-    virtual TAlpacaErr get_canreverse(bool *canreverse) = 0;
-    virtual TAlpacaErr get_ismoving(bool *ismoving) = 0;
+    // Assumes that there is a mechanical position and will handle relative position as an offset to it for you...
+    // So you only need to implement these 5 functions...
     virtual TAlpacaErr get_mechanicalposition(double *mechanicalposition) = 0;
-    virtual TAlpacaErr get_position(double *position) = 0;
-    virtual TAlpacaErr get_reverse(bool *reverse) = 0;
-    virtual TAlpacaErr put_reverse(bool reverse) = 0;
-    virtual TAlpacaErr get_stepsize(double *stepsize) = 0;
-    virtual TAlpacaErr get_targetposition(double *targetposition) = 0;
-    virtual TAlpacaErr put_halt() = 0;
-    virtual TAlpacaErr put_move(double position) = 0;
-    virtual TAlpacaErr put_moveabsolute(double position) = 0;
     virtual TAlpacaErr put_movemechanical(double position) = 0;
-    virtual TAlpacaErr put_sync(double position) = 0;
+    virtual TAlpacaErr get_stepsize(double *stepsize) = 0;
+    virtual TAlpacaErr get_ismoving(bool *ismoving) = 0;
+    virtual TAlpacaErr put_halt() = 0;
+    // handle relative to absolue for you!
+    virtual TAlpacaErr get_position(double *position) { TAlpacaErr er= get_mechanicalposition(position); if (er==ALPACA_OK) *position+= offset; return er; }
+    virtual TAlpacaErr put_sync(double position) { double pos; get_mechanicalposition(&pos); offset= position-pos; return ALPACA_OK; }
+    virtual TAlpacaErr get_targetposition(double *targetposition) { *targetposition= this->targetposition; return ALPACA_OK;}
+    virtual TAlpacaErr put_move(double position) { double pos; get_position(&pos); return put_moveabsolute(pos+position); }
+    virtual TAlpacaErr put_moveabsolute(double position) { return put_movemechanical(targetposition=position-offset); }
+    // Assumes that you can reverse and will handle saving this for you
+    virtual TAlpacaErr get_canreverse(bool *canreverse) { *canreverse= true; return ALPACA_OK; }
+    virtual TAlpacaErr get_reverse(bool *reverse) { bool can; get_canreverse(&can); if (!can) return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; *reverse= this->reverse; return ALPACA_OK; }
+    virtual TAlpacaErr put_reverse(bool reverse)  { bool can; get_canreverse(&can); if (!can) return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; this->reverse= reverse; return ALPACA_OK; }
 protected:
+    bool reverse= false;
+    double offset= 0.0f, targetposition= 0.0f;
     char const *get_type() override { return "Rotator"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
     void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
 
-// This has never been tested
+// This has never been tested but is implemented
 class CSafetyMonitor : public CAlpacaDevice { public: CSafetyMonitor(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 3; }
     virtual TAlpacaErr get_issafe(bool *issafe) = 0;
@@ -394,22 +407,79 @@ protected:
     void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
 
-// This has never been tested and will not work as I have not written the dispatch!
+// This has never been tested but is implemented
 class CSwitch : public CAlpacaDevice { public: CSwitch(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 3; }
-    virtual TAlpacaErr get_maxswitch(int32_t *maxswitch) = 0;
-    virtual TAlpacaErr get_canwrite(int32_t id, bool *canwrite) = 0;
-    virtual TAlpacaErr get_getswitch(int32_t id, bool *getswitch) = 0;
-    virtual TAlpacaErr get_getswitchdescription(int32_t id, char *buf, size_t len) = 0;
-    virtual TAlpacaErr get_getswitchname(int32_t id, char *buf, size_t len) = 0;
-    virtual TAlpacaErr get_getswitchvalue(int32_t id, double *value) = 0;
-    virtual TAlpacaErr get_minswitchvalue(int32_t id, double *value) = 0;
-    virtual TAlpacaErr get_maxswitchvalue(int32_t id, double *value) = 0;
-    virtual TAlpacaErr put_setswitch(int32_t id, bool value) = 0;
-    virtual TAlpacaErr put_setswitchname(int32_t id, const char *name) = 0;
-    virtual TAlpacaErr put_setswitchvalue(int32_t id, double value) = 0;
-    virtual TAlpacaErr get_switchstep(int32_t id, double *switchstep) = 0;
+    // Let us assume that you want to use default helpers...
+    // override the defaultSwitchDefs function to return the default switches description.
+    // then override the put_setswitch and put_setswitchvalue to act on the changes...
+    // you might also want to work on the subInit to change the initialization value if not equal to the minswitchvalues...
+      struct TSwitchDef { bool canwrite, canasync; char const*switchname, *switchdescription; float switchstep=1.0f, minswitchvalue=0.0f, maxswitchvalue=1.0f; };
+    virtual TSwitchDef const *defaultSwitchDefs(int32_t &nb) { nb= 0; return nullptr; }
+
+    virtual TAlpacaErr get_maxswitch(int32_t *maxswitch) { init(0); *maxswitch= nbswitches; return ALPACA_OK; }
+    // get info on the various switches... Most is goten from the struct returned by the defaultSwitchDefs function. But names and description can be overriden by the user...
+    virtual TAlpacaErr get_canwrite(int32_t id, bool *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switches[id].canwrite; return ALPACA_OK; }
+    virtual TAlpacaErr get_getswitchdescription(int32_t id, char *buf, size_t len) 
+    { 
+        if (!init(id)) return ALPACA_ERR_INVALID_VALUE; 
+        strncpy2(buf, switches[id].switchdescription, len); 
+        char t[20]; sprintf(t, "%ldName", id); alpaca->load(keyHeader, t, buf, buf, len);
+        return ALPACA_OK; 
+    }
+    virtual TAlpacaErr get_getswitchname(int32_t id, char *buf, size_t len) 
+    { 
+        if (!init(id)) return ALPACA_ERR_INVALID_VALUE; 
+        strncpy2(buf, switches[id].switchdescription, len); 
+        char t[20]; sprintf(t, "%ldDesc", id); alpaca->load(keyHeader, t, buf, buf, len);
+        return ALPACA_OK; 
+    }
+    virtual TAlpacaErr put_setswitchname(int32_t id, const char *name) { char t[20]; sprintf(t, "%ldName", id); alpaca->save(keyHeader, t, name); return ALPACA_OK; }
+    virtual TAlpacaErr put_setswitchdescription(int32_t id, const char *name) { char t[20]; sprintf(t, "%ldDesc", id); alpaca->save(keyHeader, t, name); return ALPACA_OK; }
+    // get/set bool value
+    virtual TAlpacaErr get_getswitch(int32_t id, bool *value)  { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switchesValues[id]!=0; return ALPACA_OK; }
+    virtual TAlpacaErr put_setswitch(int32_t id, bool value) 
+    { 
+        double m, M; if (get_minswitchvalue(id, &m)!=ALPACA_OK) return ALPACA_ERR_INVALID_VALUE; get_maxswitchvalue(id, &M);
+        switchChanged(id, switchesValues[id]= value?M:m);
+        return ALPACA_OK; 
+    }
+    // handle variable switches
+    virtual TAlpacaErr get_switchstep(int32_t id, double *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switches[id].switchstep; return ALPACA_OK; }
+    virtual TAlpacaErr get_minswitchvalue(int32_t id, double *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switches[id].minswitchvalue; return ALPACA_OK; }
+    virtual TAlpacaErr get_maxswitchvalue(int32_t id, double *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switches[id].maxswitchvalue; return ALPACA_OK; }
+    virtual TAlpacaErr get_getswitchvalue(int32_t id, double *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switchesValues[id]; return ALPACA_OK; }
+    virtual TAlpacaErr put_setswitchvalue(int32_t id, double value) 
+    { 
+        if (!init(id)) return ALPACA_ERR_INVALID_VALUE; 
+        double m, M; get_minswitchvalue(id, &m); get_maxswitchvalue(id, &M);
+        if (value<m || value>M) return ALPACA_ERR_INVALID_VALUE;
+        switchesValues[id]= value;
+        switchChanged(id, value);
+        return ALPACA_OK; 
+    }
+    // async operations... These are not implemented at all at this point. If you need them... contact me :-)
+    virtual TAlpacaErr get_canasync(int32_t id, bool *value) { if (!init(id)) return ALPACA_ERR_INVALID_VALUE; *value= switches[id].canasync; return ALPACA_OK; }
+    virtual TAlpacaErr put_setasync(int32_t id, bool state) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr put_setasyncvalue(int32_t id, double value) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_statechangecomplete(int32_t id, bool *completed) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
+
 protected:
+    int32_t nbswitches=0; TSwitchDef const *switches= nullptr;
+    double *switchesValues= nullptr;
+    virtual void switchChanged(int32_t id, double value) = 0; // override this to act on switch value changed. value is min/max switch values if the setswitch(bool) function is used.
+    virtual void subInit() {} // override to do something when the default values are read. For example you can use that to change the current switches values at startup...
+    bool init(int id) // makes sure that everything is initialized properly and return true if id is a valid switch id!
+    {
+        if (nbswitches==0)
+        {
+            switches= defaultSwitchDefs(nbswitches);
+            switchesValues= (double*)malloc(nbswitches*sizeof(double));
+            for (int i=0; i<nbswitches; i++) switchesValues[i]= switches[i].minswitchvalue;
+            subInit(); // allows configuraiton...
+        }
+        return id>=0 && id<nbswitches;
+    }
     char const *get_type() override { return "Switch"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
     void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
@@ -531,7 +601,7 @@ protected:
 // Series of functions that will look for the value for a given parameter an http form input...
 // They differ by the type returned...
 // note that if you want to use a string stuff directly, you better verify and sanitize it (there is a function for that, see lower)
-char const *getStrData(char *m, char const *parameter);
+char *getStrData(char *m, char const *parameter);
 int getBoolData(char *m, char const *parameter); // return 0 or 1 (false/true) or 2 for neither if you care!
 int getIntData(char *m, char const *parameter);
 // format for text is: [-]AAA:mm:ss.sss with : that can be replaced by ' and "

@@ -318,10 +318,10 @@ void CAlpaca::start(int port)
 // Initiationation. Gets init values from code or storage...
 CAlpaca::CAlpaca(char const *Manufacturer, char const *ManufacturerVersion, char const *DefaultServerName, char const *DefaultLocation) 
 {
-    strncpy(this->ServerName, DefaultServerName ,sizeof(this->ServerName)-1);
-    strncpy(this->Manufacturer, Manufacturer ,sizeof(this->Manufacturer)-1);
-    strncpy(this->ManufacturerVersion, ManufacturerVersion ,sizeof(this->ManufacturerVersion)-1);
-    strncpy(this->Location, DefaultLocation , sizeof(this->Location)-1);
+    strncpy2(this->ServerName, DefaultServerName ,sizeof(this->ServerName));
+    strncpy2(this->Manufacturer, Manufacturer ,sizeof(this->Manufacturer));
+    strncpy2(this->ManufacturerVersion, ManufacturerVersion ,sizeof(this->ManufacturerVersion));
+    strncpy2(this->Location, DefaultLocation , sizeof(this->Location));
     wifi[0]= wifip[0]= 0;
     uniqueid[0]= 0; 
     saveLoadBegin();
@@ -517,7 +517,7 @@ static bool putErValRaw(CMyStr *s, TAlpacaErr er, char const * v, bool transform
 // Series of functions that will look for the value for a given parameter in the input...
 // They differ by the type returned...
 // note that if you want to use a string stuff directly, you better verify and sanitize it (there is a function for that, see lower)
-char const *getStrData(char *m, char const *parameter)
+char *getStrData(char *m, char const *parameter)
 {
     if (m==nullptr) return nullptr;
     size_t plen= strlen(parameter);
@@ -541,6 +541,12 @@ int getBoolData(char *m, char const *parameter)
 int getIntData(char *m, char const *parameter)
 {
     char const *r= getStrData(m, parameter); if (r==nullptr) return -1;
+    return readInt(r);
+}
+int getIntData(char *m, char const *parameter, int def)
+{
+    char const *r= getStrData(m, parameter); if (r==nullptr) return def;
+    if (*r<'0' || *r>'9') return def;
     return readInt(r);
 }
 float getFloatData(char *m, char const *parameter, float def=0.0f)
@@ -720,6 +726,114 @@ bool CFilterWheel::dispatch(bool get, char const *url, char *data, CMyStr *s)
     return CAlpacaDevice::dispatch(get, url, data, s);
 }
 
+// These is the http handeling for rotator.The basic dispatch for all commands
+bool CRotator::dispatch(bool get, char const *url, char *data, CMyStr *s)
+{
+    bool b; double v;
+    if (get && strcmp(url, "canreverse") == 0) return putErVal(s, get_canreverse(&b), b);
+    if (get && strcmp(url, "reverse") == 0) return putErVal(s, get_reverse(&b), b);
+    if (!get && strcmp(url, "reverse") == 0) return putEr(s, put_reverse(getBoolData(data, "Reverse")));
+    if (get && strcmp(url, "stepsize") == 0) return putErVal(s, get_stepsize(&v), v);
+    if (get && strcmp(url, "ismoving") == 0) return putErVal(s, get_ismoving(&b), b);
+    if (get && strcmp(url, "position") == 0) return putErVal(s, get_position(&v), v);
+    if (get && strcmp(url, "mechanicalposition") == 0) return putErVal(s, get_mechanicalposition(&v), v);
+    if (!get && strcmp(url, "sync") == 0) return putEr(s, put_sync(getFloatData(data, "Position")));
+    if (get && strcmp(url, "targetposition") == 0) return putErVal(s, get_targetposition(&v), v);
+    if (!get && strcmp(url, "move") == 0) return putEr(s, put_move(getFloatData(data, "Position")));
+    if (!get && strcmp(url, "moveabsolute") == 0) return putEr(s, put_moveabsolute(getFloatData(data, "Position")));
+    if (!get && strcmp(url, "movemechanical") == 0) return putEr(s, put_movemechanical(getFloatData(data, "Position")));
+    return CAlpacaDevice::dispatch(get, url, data, s);
+}
+
+
+// These is the http handeling for switches.The basic dispatch for all commands
+bool CSwitch::dispatch(bool get, char const *url, char *data, CMyStr *s)
+{
+    int32_t id=getIntData(data, "Id"), vi; bool vb; double vd;
+    char b[256];
+    if (get && strcmp(url, "maxswitch") == 0) return putErVal(s, get_maxswitch(&vi), vi);
+
+    if (get && strcmp(url, "canwrite") == 0) return putErVal(s, get_canwrite(id, &vb), vb);
+    if (get && strcmp(url, "getswitch") == 0) return putErVal(s, get_getswitch(id, &vb), vb);
+    if (!get && strcmp(url, "setswitch") == 0) return putEr(s, put_setswitch(id, getBoolData(data, "State")));
+
+    if (get && strcmp(url, "getswitchname") == 0) return putErVal(s, get_getswitchname(id, b, sizeof(b)), b);
+    if (!get && strcmp(url, "putswitchname") == 0) return putEr(s, put_setswitchname(id, getStrData(data, "Name")));
+    if (get && strcmp(url, "getswitchdescription") == 0) return putErVal(s, get_getswitchdescription(id, b, sizeof(b)), b);
+    if (!get && strcmp(url, "putswitchdescription") == 0) return putEr(s, put_setswitchdescription(id, getStrData(data, "Description")));
+
+    if (get && strcmp(url, "switchstep") == 0) return putErVal(s, get_switchstep(id, &vd), vd);
+    if (get && strcmp(url, "getswitchvalue") == 0) return putErVal(s, get_getswitchvalue(id, &vd), vd);
+    if (!get && strcmp(url, "setswitchvalue") == 0) return putEr(s, put_setswitchvalue(id, getFloatData(data, "Value")));
+    if (get && strcmp(url, "minswitchvalue") == 0) return putErVal(s, get_minswitchvalue(id, &vd), vd);
+    if (get && strcmp(url, "maxswitchvalue") == 0) return putErVal(s, get_maxswitchvalue(id, &vd), vd);
+
+    
+    if (get && strcmp(url, "canasync") == 0) return putErVal(s, get_canasync(id, &vb), vb);
+    if (!get && strcmp(url, "setasync") == 0) return putEr(s, put_setasync(id, getBoolData(data, "State")));
+    if (!get && strcmp(url, "setasyncvalue") == 0) return putEr(s, put_setasyncvalue(id, getFloatData(data, "Value")));
+    if (get && strcmp(url, "statechangecomplete") == 0) return putErVal(s, get_statechangecomplete(id, &vb), vb);
+
+    return CAlpacaDevice::dispatch(get, url, data, s);
+}
+
+// These is the http handeling for switches.The basic dispatch for all commands
+bool CSafetyMonitor::dispatch(bool get, char const *url, char *data, CMyStr *s)
+{
+    bool v;
+    if (get && strcmp(url, "issafe") == 0) return putErVal(s, get_issafe(&v), v);
+    return CAlpacaDevice::dispatch(get, url, data, s);
+}
+
+// These is the http handeling for CoverCalibrator.The basic dispatch for all commands
+bool CCoverCalibrator::dispatch(bool get, char const *url, char *data, CMyStr *s)
+{
+    uint32_t vi; bool vb; TAlpacaErr er;
+    if (get && strcmp(url, "brightness") == 0) return putErVal(s, get_brightness(&vi), vi);
+    if (get && strcmp(url, "calibratorchanging") == 0) return putErVal(s, get_calibratorchanging(&vb), vb);
+    if (get && strcmp(url, "calibratorstate") == 0) { CalibratorState v; er= get_calibratorstate(&v); return putErVal(s, er, int(v)); }
+    if (get && strcmp(url, "covermoving") == 0) return putErVal(s, get_covermoving(&vb), vb);
+    if (get && strcmp(url, "coverstate") == 0) { CoverState v; er= get_coverstate(&v); return putErVal(s, er, int(v)); }
+    if (get && strcmp(url, "maxbrightness") == 0) return putErVal(s, get_maxbrightness(&vi), vi);
+
+    if (!get && strcmp(url, "calibratoroff") == 0) return putEr(s, calibratoroff());
+    if (!get && strcmp(url, "calibratoron") == 0) return putEr(s, calibratoron(getIntData(data, "Brightness")));
+    if (!get && strcmp(url, "calibratoroff") == 0) return putEr(s, calibratoroff());
+
+    if (get && strcmp(url, "closecover") == 0) return putEr(s, closecover());
+    if (get && strcmp(url, "opencover") == 0) return putEr(s, opencover());
+    if (get && strcmp(url, "haltcover") == 0) return putEr(s, haltcover());
+
+    return CAlpacaDevice::dispatch(get, url, data, s);
+}
+
+// These is the http handeling for ObservingConditions.The basic dispatch for all commands
+bool CObservingConditions::dispatch(bool get, char const *url, char *data, CMyStr *s)
+{
+    double v; 
+    if (get && strcmp(url, "averageperiod") == 0) return putErVal(s, get_averageperiod(&v), v);
+    if (!get && strcmp(url, "averageperiod") == 0) return putEr(s, put_averageperiod(getFloatData(data, "AveragePeriod")));
+
+    if (get && strcmp(url, "cloudcover") == 0) return putErVal(s, get_cloudcover(&v), v);
+    if (get && strcmp(url, "dewpoint") == 0) return putErVal(s, get_dewpoint(&v), v);
+    if (get && strcmp(url, "humidity") == 0) return putErVal(s, get_humidity(&v), v);
+    if (get && strcmp(url, "pressure") == 0) return putErVal(s, get_pressure(&v), v);
+    if (get && strcmp(url, "rainrate") == 0) return putErVal(s, get_rainrate(&v), v);
+    if (get && strcmp(url, "skybrightness") == 0) return putErVal(s, get_skybrightness(&v), v);
+    if (get && strcmp(url, "skyquality") == 0) return putErVal(s, get_skyquality(&v), v);
+    if (get && strcmp(url, "skytemperature") == 0) return putErVal(s, get_skytemperature(&v), v);
+    if (get && strcmp(url, "starfwhm") == 0) return putErVal(s, get_starfwhm(&v), v);
+    if (get && strcmp(url, "temperature") == 0) return putErVal(s, get_temperature(&v), v);
+    if (get && strcmp(url, "winddirection") == 0) return putErVal(s, get_winddirection(&v), v);
+    if (get && strcmp(url, "windgust") == 0) return putErVal(s, get_windgust(&v), v);
+    if (get && strcmp(url, "windspeed") == 0) return putErVal(s, get_windspeed(&v), v);
+    if (get && strcmp(url, "timesincelastupdate") == 0) return putErVal(s, get_timesincelastupdate(&v), v);
+    if (!get && strcmp(url, "refresh") == 0) return putEr(s, put_refresh());
+    if (get && strcmp(url, "sensordescription") == 0)  { char *d= getStrData(data, "SensorName"); char const *b; return putErVal(s, get_sensordescription(d, b), b); }
+
+    return CAlpacaDevice::dispatch(get, url, data, s);
+}
+
 // Here you will need to add dispatches for all the other classes if you want to work on them!!!
 // If you need help, contact me: cyrille.de.brebisson@gmail.com
 
@@ -829,9 +943,9 @@ bool CAlpacaDevice::setup(CAlpaca *Alpaca, int sock, bool get, char *data)
 {
     if (data!=nullptr)
     {   // case where we are asked to change the name or description for the device
-        char const *d; char t[30]; 
-        strcpy(t, keyHeader); strcat(t, "Name");        d= getStrData(data, "name"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, Name, sizeof(Name)));
-        strcpy(t, keyHeader); strcat(t, "Description"); d= getStrData(data, "description"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, Description, sizeof(Description)));
+        char const *d; 
+        d= getStrData(data, "name"); if (d!=nullptr) Alpaca->save(keyHeader, "Name", getHtmlString(d, Name, sizeof(Name)));
+        d= getStrData(data, "description"); if (d!=nullptr) Alpaca->save(keyHeader, "Description", getHtmlString(d, Description, sizeof(Description)));
     }
     // create html page...
     CMyStr s;
@@ -889,9 +1003,8 @@ void CFilterWheel::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMy
     {   // handle the change in position and the naming of the various filters...
         char const *d= getStrData(data, "position");
         if (d!=nullptr && *d>='0' && *d<='9') put_position(readInt(d));
-        char t[30]; 
-        strcpy(t, keyHeader); strcat(t, "names");        d= getStrData(data, "names"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, names, sizeof(names)));
-        strcpy(t, keyHeader); strcat(t, "focusoffsets"); d= getStrData(data, "focusoffsets"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, focusoffsets, sizeof(focusoffsets)));
+        d= getStrData(data, "names"); if (d!=nullptr) Alpaca->save(keyHeader, "names", getHtmlString(d, names, sizeof(names)));
+        d= getStrData(data, "focusoffsets"); if (d!=nullptr) Alpaca->save(keyHeader, "focusoffsets", getHtmlString(d, focusoffsets, sizeof(focusoffsets)));
     }
     // the setup html...
     s.printf("<h1>Setup</h1>"
@@ -983,7 +1096,190 @@ void CTelescope::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMySt
         if (slewing()) s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
 }
 
- // should you implement mode types, add the sub-setup here! and send them to me (cyrille.de.brebisson@gmail.com) so that they enrich the system!
+// generation of rotator specific setup html...
+void CRotator::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+    if (data!=nullptr)
+    {   //commands to move to using steps or distance...
+        float v= getFloatData(data,"sync", 1000.0f); if (v!=1000.0f) put_sync(v);
+        v= getFloatData(data,"goto", 1000.0f); if (v!=1000.0f) put_moveabsolute(v);
+        v= getFloatData(data,"reverse", 1000.0f); if (v!=1000.0f) put_reverse(v!=0.0f);
+    }
+    if (data!=nullptr && data[0]==0) put_halt(); // stop cases...
+    double pos; get_position(&pos);
+    bool reverse; get_reverse(&reverse);
+    s.printf("<h1>Position</h1>" // allows the user to go to position
+            "<table align=\"center\">"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"sync\">angle:</label></td>"
+            "      <td><input type=\"text\" id=\"sync\" name=\"sync\" value=\"%3f\"></td>"
+            "      <td><input type=\"submit\" value=\"Sync\"></td></tr>"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"goto\">angle:</label></td>"
+            "      <td><input type=\"text\" id=\"goto\" name=\"goto\" value=\"%3f\"></td>"
+            "      <td><input type=\"submit\" value=\"GoTo\"></td></tr>"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"reverse\">direction reversed:</label></td>"
+            "      <td><input type=\"text\" id=\"reverse\" reverse\" value=\"%d\"></td>"
+            "      <td><input type=\"submit\" value=\"Change\"></td></tr>"
+            "</form>"
+            "</table>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <input type=\"submit\" value=\"Stop\">"
+            "</form>"
+        , get_type(), id, pos, get_type(), id, pos, get_type(), id, reverse?1:0, get_type(), id);
+        bool moving; get_ismoving(&moving); if (moving) // add auto refresh if the focuser is moving...
+            s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
+}
+
+// generation of SafetyMonitor specific setup html...
+void CSafetyMonitor::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+    bool safe; get_issafe(&safe);
+    s.printf("<h1>Status</h1>"
+            "<h2>Device is %s</h2>"
+            "<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>"
+        , safe?"SAFE":"NOT SAFE!!", get_type(), id);
+}
+
+// generation of rotator specific setup html...
+void CSwitch::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+    if (data!=nullptr)
+    {   //commands to move to using steps or distance...
+        int id= getIntData(data, "Id", -1);
+        float v= getFloatData(data,"set", 10000000.0f);
+        if (v!=10000000.0f) put_setswitchvalue(id, v);
+        // add set names/descriptions...
+
+        char *d;
+        d= getStrData(data, "name"); if (d!=nullptr) put_setswitchname(id, getHtmlString(d, d, strlen(d)));
+        d= getStrData(data, "desc"); if (d!=nullptr) put_setswitchdescription(id, getHtmlString(d, d, strlen(d)));
+    }
+    s+= "<h1>Switches</h1>"
+        "<table align=\"center\">";
+    int32_t nb; get_maxswitch(&nb);
+    for (int i=0; id<nb; i++)
+    {
+        double v; char name[128], desc[256]; get_getswitchvalue(i, &v); get_getswitchname(i, name, sizeof(name)); get_getswitchdescription(i, desc, sizeof(desc));
+        int WARNING; // these names shold be sanitized for html use!!!!
+        s.printf(
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"set\">%d: %s</label></td>"
+            "      <td><input type=\"text\" id=\"set\" name=\"set\" value=\"%5f\"></td>"
+            "      <td><input type=\"hidden\" id=\"Id\" name=\"Id\" value=\"%d\"></td>"
+            "      <td><input type=\"submit\" value=\"change\"></td>"
+            "      <td><label>%s</label></td></tr>"
+            "</form>"
+        , get_type(), id, i, name, v, i, desc);
+    }
+    s+= "</table>";
+
+    s+= "<br><br><h1>Names and descriptions</h1>"
+        "<table align=\"center\">";
+    for (int i=0; id<nb; i++)
+    {
+        char name[128], desc[256]; get_getswitchname(i, name, sizeof(name)); get_getswitchdescription(i, desc, sizeof(desc));
+        int WARNING; // these names shold be sanitized for html use!!!!
+        s.printf(
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"set\">%d:</label></td>"
+            "      <td><input type=\"text\" id=\"name\" name=\"name\" value=\"%s\"></td>"
+            "      <td><input type=\"text\" id=\"desc\" name=\"desc\" value=\"%s\"></td>"
+            "      <td><input type=\"hidden\" id=\"Id\" name=\"Id\" value=\"%d\"></td>"
+            "      <td><input type=\"submit\" value=\"change\"></td>"
+            "</form>"
+        , get_type(), id, i, name, desc, i);
+    }
+    s+= "</table>";
+}
+
+// generation of rotator specific setup html...
+void CCoverCalibrator::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+    if (data!=nullptr)
+    {   //commands to move to using steps or distance...
+        int32_t v= getIntData(data,"calibrateon", -1); if (v!=-1) calibratoron(v);
+        v= getIntData(data, "calibratoroff", -1); if (v!=-1) calibratoroff();
+        v= getIntData(data, "closecover", -1); if (v!=-1) closecover();
+        v= getIntData(data, "opencover", -1); if (v!=-1) opencover();
+        v= getIntData(data, "haltcover", -1); if (v!=-1) haltcover();
+    }
+    uint32_t b, mb; get_brightness(&b); get_maxbrightness(&mb);
+    bool moving, changing; get_calibratorchanging(&changing); get_covermoving(&moving);
+    CoverState cs; get_coverstate(&cs);
+    static char const *css[]={"NotPresent", "Closed", "Moving", "Open", "Unknown", "Error"};
+    s.printf("<h1>Calibrator%s</h1>" // allows the user to go to position
+            "<table align=\"center\">"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"calibrateon\">brigthness (max:%d):</label></td>"
+            "      <td><input type=\"text\" id=\"calibrateon\" name=\"calibrateon\" value=\"%ld\"></td>"
+            "      <td><input type=\"submit\" value=\"calibrateon\"></td></tr>"
+            "</form>"
+            "<h1>Cover%s:%s</h1>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td><input type=\"hidden\" id=\"closecover\" name=\"closecover\" value=\"1\"></td>"
+            "      <td><input type=\"submit\" value=\"closecover\"></td></tr>"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td><input type=\"hidden\" id=\"opencover\" name=\"opencover\" value=\"1\"></td>"
+            "      <td><input type=\"submit\" value=\"opencover\"></td></tr>"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td><input type=\"hidden\" id=\"haltcover\" name=\"haltcover\" value=\"1\"></td>"
+            "      <td><input type=\"submit\" value=\"haltcover\"></td></tr>"
+            "</form>"
+            "</table>"
+        , changing?" (Changing)":"", get_type(), id, mb, b,
+        moving?" (Moving)":"", css[cs], get_type(), id);
+}
+
+// generation of rotator specific setup html...
+void CObservingConditions::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+    if (data!=nullptr)
+    {   //commands to move to using steps or distance...
+        float v= getFloatData(data,"averageperiod", -1.0f); if (v!=-1.0f) put_averageperiod(v);
+        int i= getIntData(data, "refresh", -1); if (v!=-1) put_refresh();
+    }
+    TAlpacaErr er; double v;
+    er= get_averageperiod(&v);
+    if (er==ALPACA_OK) 
+        s.printf("<table align=\"center\">"
+                "<form action=\"/setup/v1/%s/%d/setup\">"
+                "  <tr><td><input type=\"hidden\" id=\"refresh\" name=\"refresh\" value=\"1\"></td>"
+                "      <td><input type=\"submit\" value=\"refresh\"></td></tr>"
+                "</form></table>"
+            , get_type(), id, v);
+    s+="<h1>Sensors</h1>";
+    er= get_cloudcover(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>cloud cover: %f</h2><br>", v);
+    er= get_dewpoint(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>dewpoint: %f</h2><br>", v);
+    er= get_humidity(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>humidity: %f</h2><br>", v);
+    er= get_pressure(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>pressure: %f</h2><br>", v);
+    er= get_rainrate(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_rainrate: %f</h2><br>", v);
+    er= get_skybrightness(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skybrightness: %f</h2><br>", v);
+    er= get_skyquality(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skyquality: %f</h2><br>", v);
+    er= get_skytemperature(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skytemperature: %f</h2><br>", v);
+    er= get_starfwhm(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_starfwhm: %f</h2><br>", v);
+    er= get_temperature(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_temperature: %f</h2><br>", v);
+    er= get_winddirection(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_winddirection: %f</h2><br>", v);
+    er= get_windgust(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_windgust: %f</h2><br>", v);
+    er= get_windspeed(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_windspeed: %f</h2><br>", v);
+
+    er= get_averageperiod(&v);
+    if (er==ALPACA_OK)
+        s.printf("<table align=\"center\">"
+                "<form action=\"/setup/v1/%s/%d/setup\">"
+                "  <tr><td align=\"right\"><label for=\"averageperiod\">average period:</label></td>"
+                "      <td><input type=\"text\" id=\"averageperiod\" name=\"averageperiod\" value=\"%f\"></td>"
+                "      <td><input type=\"submit\" value=\"averageperiod\"></td></tr>"
+                "</form></table>"
+            , get_type(), id, v);
+}
+
+// should you implement mode types, add the sub-setup here! and send them to me (cyrille.de.brebisson@gmail.com) so that they enrich the system!
 
 //////////////////////////////////////
 // Persistance stuff...
@@ -1014,7 +1310,7 @@ void CAlpaca::save(char const *key, float v)
 char *CAlpaca::load(char const *key, char const *def, char *buf, size_t buflen)
 {
     saveLoadBegin();
-    strncpy(buf, def, buflen); // copy default in result.
+    strncpy2(buf, def, buflen); // copy default in result.
     esp_err_t err= nvs_get_blob(saveLoadHandle, key, buf, &buflen); // does NOT modify buf if error....
     saveLoadEnd();
     return buf;
