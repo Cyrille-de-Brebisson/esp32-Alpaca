@@ -40,6 +40,8 @@
 * For testing, you can of course compile and run this under windows!
 * You will see some #ifndef _WIN32 throughout these files which are designed exactly for that...
 ****************************************************************/
+#define HASMilisecondTime // define this if you have a function called Milisecond which will return a time counter in milisecond. This is used for UTCTime in CTelescope.
+#define ALPACA
 
 #define _CRT_SECURE_NO_WARNINGS // allows windows compilation
 #include <stdint.h>
@@ -85,7 +87,9 @@ class CAlpaca { public:
     void saveLoadEnd();
     void save(char const *key, char const *v);
     void save(char const *key, int32_t v);
+#ifndef _WIN32 // on win32, int and int32_t are the same and it causes conflicts
     void save(char const *key, int v) { save(key, int32_t(v)); }
+#endif
     void save(char const *key, float v);
     void save(char const *key, uint8_t const *v, int size);
     // These are the same, but they handle a key spread on 2 strings. For example a "header" and "key"
@@ -95,7 +99,9 @@ class CAlpaca { public:
     char *load(char const *key, char const *def, char *buf, size_t buflen); // put data in buf. return it also for convinience... buf MUST be large enough for def
     bool load(char const *key, uint8_t *buf, size_t buflen); // load data in buf. return true if successful
     int32_t load(char const *key, int32_t def);
+#ifndef _WIN32
     int load(char const *key, int def) { return load(key, int32_t(def)); }
+#endif
     float load(char const *key, float def);
     // These are the same, but they handle a key spread on 2 strings. For example a "header" and "key"
     template <typename T> T load(char const *key1, char const *key2, T v) { char t[100]; strcpy(t, key1); strcat(t, key2); return load(t, v); }
@@ -263,8 +269,9 @@ class CFocuser : public CAlpacaDevice { public:
     virtual int32_t get_stepsize() { return alpaca->load(keyHeader, "FocStepSize", int32_t(6)); }
     virtual TAlpacaErr put_halt() = 0;
     virtual TAlpacaErr put_move(int32_t position) = 0;
-    virtual TAlpacaErr get_tempcomp(bool *tempcomp) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
-    virtual TAlpacaErr put_tempcomp(bool tempcomp) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
+        bool _tempComp= false;
+    virtual TAlpacaErr get_tempcomp(bool *tempcomp) { *tempcomp= _tempComp; return ALPACA_OK; }
+    virtual TAlpacaErr put_tempcomp(bool tempcomp) { if (tempcomp) return ALPACA_ERR_INVALID_VALUE; _tempComp= tempcomp; return ALPACA_OK; }
     virtual bool get_tempcompavailable() { return false; }
     virtual TAlpacaErr get_temperature(double *temperature) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; }
 
@@ -274,7 +281,7 @@ protected:
     char const *get_type() override { return "Focuser"; }
 };
 
-// This has never been tested and will not work as I have not written the dispatch!
+// This has never been tested and will not work as I have not written the dispatch and none of the features are implemented!
 class CCamera : public CAlpacaDevice { public: CCamera(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
 protected:
     uint32_t get_interfaceversion() override { return 4; }
@@ -309,32 +316,49 @@ protected:
 // This has never been tested and will not work as I have not written the dispatch!
 class CDome : public CAlpacaDevice { public: CDome(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
     uint32_t get_interfaceversion() override { return 3; }
-    virtual TAlpacaErr get_altitude(float *altitude) = 0;
-    virtual TAlpacaErr get_athome(bool *athome) = 0;
-    virtual TAlpacaErr get_atpark(bool *atpark) = 0;
-    virtual TAlpacaErr get_azimuth(float *azimuth) = 0;
-    virtual TAlpacaErr get_canfindhome(bool *canfindhome) = 0;
-    virtual TAlpacaErr get_canpark(bool *canpark) = 0;
-    virtual TAlpacaErr get_cansetaltitude(bool *cansetaltitude) = 0;
-    virtual TAlpacaErr get_cansetazimuth(bool *cansetazimuth) = 0;
-    virtual TAlpacaErr get_cansetpark(bool *cansetpark) = 0;
-    virtual TAlpacaErr get_cansetshutter(bool *cansetshutter) = 0;
-    virtual TAlpacaErr get_canslave(bool *canslave) = 0;
-    virtual TAlpacaErr get_cansyncazimuth(bool *cansyncazimuth) = 0;
-      enum ShutterState { Open, Closed, Opening, Closing, Error };
-    virtual TAlpacaErr get_shutterstatus(ShutterState *shutterstatus) = 0;
-    virtual TAlpacaErr get_slaved(bool *slaved) = 0;
-    virtual TAlpacaErr put_slaved(bool slaved) = 0;
-    virtual TAlpacaErr get_slewing(bool *slewing) = 0;
-    virtual TAlpacaErr put_abortslew() = 0;
-    virtual TAlpacaErr put_closeshutter() = 0;
-    virtual TAlpacaErr put_findhome() = 0;
-    virtual TAlpacaErr put_openshutter() = 0;
-    virtual TAlpacaErr put_park() = 0;
-    virtual TAlpacaErr put_setpark() = 0;
-    virtual TAlpacaErr put_slewtoaltitude(float altitude) = 0;
-    virtual TAlpacaErr put_slewtoazimuth(float azimuth) = 0;
-    virtual TAlpacaErr put_synctoazimuth(float azimuth) = 0;
+
+    // If you have a sliding roof, use this interface (shutter)...
+    virtual TAlpacaErr get_cansetshutter(bool *cansetshutter) { *cansetshutter= false; return ALPACA_OK; }
+      // ShutterState Open:0 Closed:1 Opening:2 Closing:3 Error:4
+    virtual TAlpacaErr get_shutterstatus(int32_t *shutterstatus) { *shutterstatus= 4; return ALPACA_OK; }
+    virtual TAlpacaErr put_closeshutter() { return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr put_openshutter() { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+    // This part is mostly for rotating domes...
+    bool slewing= false;
+    virtual TAlpacaErr get_slewing(bool *slewing) { *slewing= this->slewing; return ALPACA_OK; }
+    virtual TAlpacaErr put_abortslew()  { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+    virtual TAlpacaErr get_canfindhome(bool *canfindhome) { *canfindhome= false; return ALPACA_OK; }
+    bool athome= false;
+    virtual TAlpacaErr get_athome(bool *athome) { *athome= this->athome; return ALPACA_OK; }
+    virtual TAlpacaErr put_findhome() { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+    double azimuth= 0.0f; // current value. Update when moves or override get
+    virtual TAlpacaErr get_azimuth(double *azimuth) { *azimuth= this->azimuth; return ALPACA_OK; }
+    virtual TAlpacaErr get_cansetazimuth(bool *cansetazimuth) { *cansetazimuth= false; return ALPACA_OK; }
+    virtual TAlpacaErr put_slewtoazimuth(double azimuth)  { return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_cansyncazimuth(bool *cansyncazimuth) { *cansyncazimuth=false; return ALPACA_OK; }
+    virtual TAlpacaErr put_synctoazimuth(double azimuth) { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+    double altitude= 0.0f; // current value. Update when moves or override get
+    virtual TAlpacaErr get_altitude(double *altitude) { *altitude= this->altitude; return ALPACA_OK; }
+    virtual TAlpacaErr get_cansetaltitude(bool *cansetaltitude) { *cansetaltitude= cansetaltitude; return ALPACA_OK; }
+    virtual TAlpacaErr put_slewtoaltitude(double altitude) { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+    bool atpark= false;
+    virtual TAlpacaErr get_atpark(bool *atpark) { *atpark= this->atpark; return ALPACA_OK; }
+    virtual TAlpacaErr get_canpark(bool *canpark) { *canpark= false; return ALPACA_OK; }
+    virtual TAlpacaErr put_park() { return ALPACA_ERR_NOT_IMPLEMENTED; }
+    virtual TAlpacaErr get_cansetpark(bool *cansetpark) { *cansetpark=false; return ALPACA_OK; }
+    virtual TAlpacaErr put_setpark() { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
+     // this is used for integrated systems where you have dome and telescope in the same system and they can coordonate...
+    bool slaved= false;
+    virtual TAlpacaErr get_canslave(bool *canslave) { *canslave= false; return ALPACA_OK; }
+    virtual TAlpacaErr get_slaved(bool *slaved) { *slaved= this->slaved; return ALPACA_OK; }
+    virtual TAlpacaErr put_slaved(bool slaved) { return ALPACA_ERR_NOT_IMPLEMENTED; }
+
 protected:
     char const *get_type() override { return "Dome"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
@@ -414,8 +438,10 @@ class CSwitch : public CAlpacaDevice { public: CSwitch(int id, char const *drive
     // override the defaultSwitchDefs function to return the default switches description.
     // then override the put_setswitch and put_setswitchvalue to act on the changes...
     // you might also want to work on the subInit to change the initialization value if not equal to the minswitchvalues...
+	// The default implementation only requires you to implement defaultSwitchDefs and switchChanged
+	// and lets the user change/save switches names and description...
       struct TSwitchDef { bool canwrite, canasync; char const*switchname, *switchdescription; float switchstep=1.0f, minswitchvalue=0.0f, maxswitchvalue=1.0f; };
-    virtual TSwitchDef const *defaultSwitchDefs(int32_t &nb) { nb= 0; return nullptr; }
+    virtual TSwitchDef const *defaultSwitchDefs(int32_t &nb) =0; // { nb= 0; return nullptr; }
 
     virtual TAlpacaErr get_maxswitch(int32_t *maxswitch) { init(0); *maxswitch= nbswitches; return ALPACA_OK; }
     // get info on the various switches... Most is goten from the struct returned by the defaultSwitchDefs function. But names and description can be overriden by the user...
@@ -423,14 +449,14 @@ class CSwitch : public CAlpacaDevice { public: CSwitch(int id, char const *drive
     virtual TAlpacaErr get_getswitchdescription(int32_t id, char *buf, size_t len) 
     { 
         if (!init(id)) return ALPACA_ERR_INVALID_VALUE; 
-        strncpy2(buf, switches[id].switchdescription, len); 
+        strncpy2(buf, switches[id].switchdescription, int(len)); 
         char t[20]; sprintf(t, "%ldName", id); alpaca->load(keyHeader, t, buf, buf, len);
         return ALPACA_OK; 
     }
     virtual TAlpacaErr get_getswitchname(int32_t id, char *buf, size_t len) 
     { 
         if (!init(id)) return ALPACA_ERR_INVALID_VALUE; 
-        strncpy2(buf, switches[id].switchdescription, len); 
+        strncpy2(buf, switches[id].switchdescription, int(len));
         char t[20]; sprintf(t, "%ldDesc", id); alpaca->load(keyHeader, t, buf, buf, len);
         return ALPACA_OK; 
     }
@@ -486,7 +512,8 @@ protected:
 };
 
 // This been tested and works :-) for once!
-class CTelescope : public CAlpacaDevice { public: CTelescope(int id, char const *driverInfo, char const *driverVersion, char const *defaultName, char const *defaultDescription): CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
+class CTelescope : public CAlpacaDevice { 
+    public: CTelescope(int id, char const* driverInfo, char const* driverVersion, char const* defaultName, char const* defaultDescription) : CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
 protected:
     uint32_t get_interfaceversion() override { return 4; }
     char const *get_type() override { return "Telescope"; }
@@ -501,11 +528,11 @@ protected:
     virtual float get_focallength() { return alpaca->load(keyHeader, "focallength", 400.0f); } // Returns the telescope's focal length in meters.
     virtual TAlpacaErr set_focallength(float v) { alpaca->save(keyHeader, "focallength", v); return ALPACA_OK;  } // Returns the telescope's focal length in meters.
     virtual float get_siteelevation() { return alpaca->load(keyHeader, "siteelevation", 1060.0f); } // Returns the observing $SiteElevation above mean sea level.
-    virtual TAlpacaErr set_siteelevation(float v) { alpaca->save(keyHeader, "set_siteelevation", v); return ALPACA_OK; } // Sets the observing site's elevation above mean sea level.
+    virtual TAlpacaErr set_siteelevation(float v) { if (v<-200.0f || v>9999.0f) return ALPACA_ERR_INVALID_VALUE; alpaca->save(keyHeader, "set_siteelevation", v); return ALPACA_OK; } // Sets the observing site's elevation above mean sea level.
     virtual float get_sitelatitude() { return alpaca->load(keyHeader, "sitelatitude", 45.007109f); } // Returns the observing $SiteLatitude .
-    virtual TAlpacaErr set_sitelatitude(float v) { alpaca->save(keyHeader, "sitelatitude", v); return ALPACA_OK; } // Sets the observing site's latitude.
+    virtual TAlpacaErr set_sitelatitude(float v) { if (v<-90.0f || v>90.0f) return ALPACA_ERR_INVALID_VALUE; alpaca->save(keyHeader, "sitelatitude", v); return ALPACA_OK; } // Sets the observing site's latitude.
     virtual float get_sitelongitude() { return alpaca->load(keyHeader, "sitelongitude", 4.335247f); } // Returns the observing site's longitude.
-    virtual TAlpacaErr set_sitelongitude(float v) { alpaca->save(keyHeader, "sitelongitude", v); return ALPACA_OK; } // Sets the observing $SiteLongitude .
+    virtual TAlpacaErr set_sitelongitude(float v) {  if (v<-180.0f || v>180.0f) return ALPACA_ERR_INVALID_VALUE;alpaca->save(keyHeader, "sitelongitude", v); return ALPACA_OK; } // Sets the observing $SiteLongitude .
 
     virtual bool canfindhome() { return false; } // Indicates whether the mount can find the home position.
     virtual bool athome() { return false; } // Indicates whether the mount is at the home position.
@@ -535,7 +562,7 @@ protected:
     virtual TAlpacaErr set_tracking(bool v) { tracking= v; return ALPACA_OK; } // Enables or disables telescope $Tracking.
         int trackingrate= 0; // 0: sideral, 1: lunar, 2: solar, 3: king (15.0369 arc"/s)
     virtual int get_trackingrate() { return trackingrate; } // Returns the current tracking rate. 0: sideral, 1: lunar, 2: solar, 3: king (15.0369 arc"/s)
-    virtual TAlpacaErr set_trackingrate(int v) { trackingrate= v; return ALPACA_OK; } // Sets the mount's $TrackingRate.
+    virtual TAlpacaErr set_trackingrate(int v) { if (v<0 || v>3) return ALPACA_ERR_INVALID_VALUE; trackingrate= v; return ALPACA_OK; } // Sets the mount's $TrackingRate.
     virtual char const *trackingrates() { return "[0,1,2,3]"; } // Returns a collection of supported DriveRates values. i.e: a json object that has 0 to 4 integers in it...
 
     virtual bool cansetrightascensionrate() { return false; } // Indicates whether the RightAscensionRate property can be changed.
@@ -546,7 +573,7 @@ protected:
     virtual TAlpacaErr set_declinationrate(float v) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Sets the telescope's $DeclinationRate tracking rate.
          
     virtual bool slewing() = 0; // Indicates whether the telescope is currently slewing.
-    virtual TAlpacaErr set_slewsettletime(int32_t v) { alpaca->save(keyHeader, "slewsettletime", v); return ALPACA_OK; }// Sets the post-slew $SlewSettleTime time.
+    virtual TAlpacaErr set_slewsettletime(int32_t v) { if (v<0) return ALPACA_ERR_INVALID_VALUE; alpaca->save(keyHeader, "slewsettletime", v); return ALPACA_OK; }// Sets the post-slew $SlewSettleTime time.
     virtual int get_slewsettletime() { return alpaca->load(keyHeader, "slewsettletime", int32_t(1)); } // Returns the post-slew settling time (sec)
     virtual TAlpacaErr abortslew() = 0; // Immediatley stops a slew in progress.
     virtual bool canslew() { return false; } // Indicates whether the telescope can slew synchronously.
@@ -558,9 +585,9 @@ protected:
 
         float targetdeclination= 0.0f, targetrightascension= 0.0f;
     virtual float get_targetdeclination() { return targetdeclination; } // Returns the current target declination.
-    virtual TAlpacaErr set_targetdeclination(float v) { targetdeclination= v; return ALPACA_OK; } // Sets the $TargetDeclination of a slew or sync.
+    virtual TAlpacaErr set_targetdeclination(float v) { if (v<-0.0f || v>90.0f) return ALPACA_ERR_INVALID_VALUE; targetdeclination= v; return ALPACA_OK; } // Sets the $TargetDeclination of a slew or sync.
     virtual float get_targetrightascension() { return targetrightascension; } // Returns the current target right ascension.
-    virtual TAlpacaErr set_targetrightascension(float v) { targetrightascension= v; return ALPACA_OK; } // Sets the target $TargetRightAscension of a slew or sync.
+    virtual TAlpacaErr set_targetrightascension(float v) {  if (v<-0.0f || v>24.0f) return ALPACA_ERR_INVALID_VALUE; targetrightascension= v; return ALPACA_OK; } // Sets the target $TargetRightAscension of a slew or sync.
     virtual TAlpacaErr slewtotarget() { return slewtocoordinates(targetdeclination, targetrightascension); } // Synchronously slew to the TargetRightAscension and TargetDeclination coordinates.
     virtual TAlpacaErr slewtotargetasync() { return slewtocoordinatesasync(targetdeclination, targetrightascension); } // Asynchronously slew to the TargetRightAscension and TargetDeclination coordinates.
     virtual TAlpacaErr synctotarget() { return synctocoordinates(targetdeclination, targetrightascension); } // Syncs to the TargetRightAscension and TargetDeclination coordinates.
@@ -587,11 +614,16 @@ protected:
     virtual int destinationsideofpier(float ra, float dec) { return -1; } // Predicts the pointing state after a German equatorial mount slews to given $RightAscension $Declination coordinates. 0: east, 1: west: -1: unknown
 
     virtual TAlpacaErr siderealtime(float &v) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Returns the local apparent sidereal time.
-    virtual TAlpacaErr get_utcdate(char *b) { b[0]= 0; return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Returns the UTC date/time of the telescope's internal clock. b will be at least 20chrs... "8910-91-19T25:83:67Z"
-    virtual TAlpacaErr set_utcdate(char const *b) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Sets the UTC date/time of the telescope's internal clock.
+    #ifndef HASMilisecondTime // These are concidered mandatory by Ascom
+        virtual TAlpacaErr get_utcdate(char *b) =0; // Returns the UTC date/time of the telescope's internal clock. b will be at least 20chrs... "8910-91-19T25:83:67Z"
+        virtual TAlpacaErr set_utcdate(char const *b) =0; // Sets the UTC date/time of the telescope's internal clock.
+    #else
+        virtual TAlpacaErr get_utcdate(char* b);
+        virtual TAlpacaErr set_utcdate(char const* b);
+    #endif
 
     virtual TAlpacaErr axisrates(int axis, char *b) { b[0]= 0; return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Returns the rates at which the telescope may be moved about the specified $Axis  returns [{"Maximum": 0,"Minimum": 0}] in b (b will be 30 chr long)
-    virtual bool canmoveaxis(int axis) { return false; } // Indicates whether the telescope can move the requested $Axis.
+    virtual bool canmoveaxis(int axis) { return axis<2; } // Indicates whether the telescope can move the requested $Axis.
     virtual TAlpacaErr moveaxis(int axis, float rate) { return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Moves a telescope $Axis at the given $Rate.
 
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
@@ -609,3 +641,4 @@ char *floatToRa(float ra, char *b); // b must be long enough. b is returned...
 static char inline *floatToDec(float dec, char *b) { return floatToRa(dec /**15.0f*/, b); } // b must be long enough. b is returned...
 bool RaToFloat(char const *b, float &ra);  // return true if no error
 bool DecToFloat(char const *b, float &ra); // return true if no error
+char *getHtmlString(char const *in, char *buf, size_t buflen); // html string decyphering...

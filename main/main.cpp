@@ -249,3 +249,5 @@ extern "C" void app_main()
     // and start the http and udp servers!
     alpaca->start(80);
 }
+
+uint32_t Milisecond() { return xTaskGetTickCount() * portTICK_PERIOD_MS; }
