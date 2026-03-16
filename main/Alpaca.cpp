@@ -14,9 +14,9 @@
 // GET /management/v1/description
 // GET /management/v1/configureddevices
 // GET /setup
-// GET /setup/v1/focusser/0/setup
-// GET /api/v1/focusser/0/command?parameters=...&parameters=...&
-// PUT /api/v1/focusser/0/command with the parameters=...&parameters=...& under as "data"....
+// GET /setup/v1/focuser/0/setup
+// GET /api/v1/focuser/0/command?parameters=...&parameters=...&
+// PUT /api/v1/focuser/0/command with the parameters=...&parameters=...& under as "data"....
 // 
 // ---------------------
 // Typical HTTP response:
@@ -361,7 +361,22 @@ void CFilterWheel::subLoad(CAlpaca *alpaca)
     alpaca->load(keyHeader, "focusoffsets", focusoffsets, focusoffsets, sizeof(focusoffsets));
 }
 
-static std::atomic<int> transactionsId= 0; // transaction counter....
+void CFocuser::subLoad(CAlpaca *alpaca)
+{
+    maxSteps= alpaca->load(keyHeader, "maxSteps", maxSteps);
+    stepSize= alpaca->load(keyHeader, "stepSize", stepSize);
+    if (maxSpeed!=-1) maxSpeed= alpaca->load(keyHeader, "maxSpeed", maxSpeed);
+    if (msToMaxSpeed!=-1) msToMaxSpeed= alpaca->load(keyHeader, "msToMaxSpeed", msToMaxSpeed);
+    if (motorDirection!=-1) motorDirection= alpaca->load(keyHeader, "motorDirection", motorDirection);
+}
+
+void CTelescope::subLoad(CAlpaca *alpaca)
+{
+    alpaca->load(keyHeader, "mount", (uint8_t*)&mount, sizeof(mount));
+}
+
+
+static std::atomic<int> transactionsId= 0; // transactio counter....
 
 // Various http replies/headers...
 static char const httpokheader[]= "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n";
@@ -493,7 +508,7 @@ static bool putErVal(CMyStr *s, TAlpacaErr er, int32_t v)
     return true;
 }
 #endif
-static bool putErVal(CMyStr *s, TAlpacaErr er, double v)
+static bool putErVal(CMyStr *s, TAlpacaErr er, float v)
 {
     s->printf("\"ErrorNumber\":%d,\"ErrorMessage\":\"%s\",\"Value\":%f", er, msgFromEr(er), v);
     return true;
@@ -525,11 +540,10 @@ char *getStrData(char *m, char const *parameter)
 {
     if (m==nullptr) return nullptr;
     size_t plen= strlen(parameter);
-    while (true) // search parameter followed by "=" in string...
+    while (true) // search parameter=value& in string...
     {
-        m= strstr(m, parameter); if (m==nullptr) return nullptr; 
-        m+= plen; // skip parameter...
-        if (*m=='=') return m+1; // and an '=', we got it!!!!
+        if (memcmp(m, parameter, plen)==0 && m[plen]=='=') return m+plen+1;
+        m= strchr(m, '&'); if (m==nullptr) return nullptr; m++;
     }
 }
 // return 0 or 1 (false/true) or 2 for neither if you care!
@@ -547,13 +561,13 @@ int getIntData(char *m, char const *parameter)
     char const *r= getStrData(m, parameter); if (r==nullptr) return -1;
     return readInt(r);
 }
-int getIntData(char *m, char const *parameter, int def)
+int getIntDataDef(char *m, char const *parameter, int def)
 {
     char const *r= getStrData(m, parameter); if (r==nullptr) return def;
     if (*r<'0' || *r>'9') return def;
     return readInt(r);
 }
-float getFloatData(char *m, char const *parameter, float def=0.0f)
+float getFloatDataDef(char *m, char const *parameter, float def=0.0f)
 {
     char const *r= getStrData(m, parameter); if (r==nullptr) return def;
     bool neg= false; if (*r=='-') neg= true, r++;
@@ -567,6 +581,20 @@ float getFloatData(char *m, char const *parameter, float def=0.0f)
         while (*r>='0' && *r<='9') { ret+= (*r++-'0')*d; d/= 10.0f; }
     }
     if (!neg) return ret; return -ret;
+}
+bool getIntData(char *m, char const *parameter, int &v)
+{
+    char const *r= getStrData(m, parameter); if (r==nullptr) return false;
+    if (*r<'0' || *r>'9') return false;
+    v= readInt(r);
+    return true;
+}
+bool getFloatData(char *m, char const *parameter, float &v)
+{
+    char const *r= getStrData(m, parameter); if (r==nullptr) return false;
+    if ((*r<'0' || *r>'9') && *r!='-') return false;
+    v= readFloat(r);
+    return true;
 }
 
 // This is called in response to a http request and handles things which are common to all devices...
@@ -604,17 +632,17 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "alignmentmode")==0) return putErVal(s, ALPACA_OK, alignmentmode());
     if (get && strcmp(url, "equatorialsystem")==0) return putErVal(s, ALPACA_OK, equatorialsystem());
     if (get && strcmp(url, "aperturearea")==0) return putErVal(s, ALPACA_OK, get_aperturearea());
-    if (!get && strcmp(url, "aperturearea")==0) return putEr(s, set_aperturearea(getFloatData(data, "ApertureArea")));
+    if (!get && strcmp(url, "aperturearea")==0) return putEr(s, set_aperturearea(getFloatDataDef(data, "ApertureArea", 0.0f)));
     if (get && strcmp(url, "aperturediameter")==0) return putErVal(s, ALPACA_OK, get_aperturediameter());
-    if (!get && strcmp(url, "aperturediameter")==0) return putEr(s, set_aperturediameter(getFloatData(data, "ApertureDiameter")));
+    if (!get && strcmp(url, "aperturediameter")==0) return putEr(s, set_aperturediameter(getFloatDataDef(data, "ApertureDiameter", 0.0f)));
     if (get && strcmp(url, "focallength")==0) return putErVal(s, ALPACA_OK, get_focallength());
-    if (!get && strcmp(url, "focallength")==0) return putEr(s, set_focallength(getFloatData(data, "FocalLength")));
+    if (!get && strcmp(url, "focallength")==0) return putEr(s, set_focallength(getFloatDataDef(data, "FocalLength", 0.0f)));
     if (get && strcmp(url, "siteelevation")==0) return putErVal(s, ALPACA_OK, get_siteelevation());
-    if (!get && strcmp(url, "siteelevation")==0) return putEr(s, set_siteelevation(getFloatData(data, "SiteElevation")));
+    if (!get && strcmp(url, "siteelevation")==0) return putEr(s, set_siteelevation(getFloatDataDef(data, "SiteElevation", 0.0f)));
     if (get && strcmp(url, "sitelatitude")==0) return putErVal(s, ALPACA_OK, get_sitelatitude());
-    if (!get && strcmp(url, "sitelatitude")==0) return putEr(s, set_sitelatitude(getFloatData(data, "SiteLatitude")));
+    if (!get && strcmp(url, "sitelatitude")==0) return putEr(s, set_sitelatitude(getFloatDataDef(data, "SiteLatitude", 0.0f)));
     if (get && strcmp(url, "sitelongitude")==0) return putErVal(s, ALPACA_OK, get_sitelongitude());
-    if (!get && strcmp(url, "sitelongitude")==0) return putEr(s, set_sitelongitude(getFloatData(data, "SiteLongitude")));
+    if (!get && strcmp(url, "sitelongitude")==0) return putEr(s, set_sitelongitude(getFloatDataDef(data, "SiteLongitude", 0.0f)));
     
     if (get && strcmp(url, "canfindhome")==0) return putErVal(s, ALPACA_OK, canfindhome());
     if (get && strcmp(url, "athome")==0) return putErVal(s, ALPACA_OK, athome());
@@ -632,9 +660,9 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "ispulseguiding")==0) return putErVal(s, ALPACA_OK, ispulseguiding());
     if (get && strcmp(url, "cansetguiderates")==0) return putErVal(s, ALPACA_OK, cansetguiderates());
     if (get && strcmp(url, "guideratedeclination")==0) return putErVal(s, ALPACA_OK, get_guideratedeclination());
-    if (!get && strcmp(url, "guideratedeclination")==0) return putEr(s, set_guideratedeclination(getFloatData(data, "GuideRateDeclination")));
+    if (!get && strcmp(url, "guideratedeclination")==0) return putEr(s, set_guideratedeclination(getFloatDataDef(data, "GuideRateDeclination", 0.0f)));
     if (get && strcmp(url, "guideraterightascension")==0) return putErVal(s, ALPACA_OK, get_guideraterightascension());
-    if (!get && strcmp(url, "guideraterightascension")==0) return putEr(s, set_guideraterightascension(getFloatData(data, "GuideRateRightAscension")));
+    if (!get && strcmp(url, "guideraterightascension")==0) return putEr(s, set_guideraterightascension(getFloatDataDef(data, "GuideRateRightAscension", 0.0f)));
 
     if (get && strcmp(url, "cansettracking")==0) return putErVal(s, ALPACA_OK, cansettracking());
     if (get && strcmp(url, "tracking")==0) return putErVal(s, ALPACA_OK, get_tracking());
@@ -645,10 +673,10 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
 
     if (get && strcmp(url, "cansetrightascensionrate")==0) return putErVal(s, ALPACA_OK, cansetrightascensionrate());
     if (get && strcmp(url, "rightascensionrate")==0) return putErVal(s, ALPACA_OK, get_rightascensionrate());
-    if (!get && strcmp(url, "rightascensionrate")==0) return putEr(s, set_rightascensionrate(getFloatData(data, "RightAscensionRate")));
+    if (!get && strcmp(url, "rightascensionrate")==0) return putEr(s, set_rightascensionrate(getFloatDataDef(data, "RightAscensionRate", 0.0f)));
     if (get && strcmp(url, "cansetdeclinationrate")==0) return putErVal(s, ALPACA_OK, cansetdeclinationrate());
     if (get && strcmp(url, "declinationrate")==0) return putErVal(s, ALPACA_OK, get_declinationrate());
-    if (!get && strcmp(url, "declinationrate")==0) return putEr(s, set_declinationrate(getFloatData(data, "DeclinationRate")));
+    if (!get && strcmp(url, "declinationrate")==0) return putEr(s, set_declinationrate(getFloatDataDef(data, "DeclinationRate", 0.0f)));
 
     if (get && strcmp(url, "slewing")==0) return putErVal(s, ALPACA_OK, slewing());
     if (get && strcmp(url, "slewsettletime")==0) return putErVal(s, ALPACA_OK, get_slewsettletime());
@@ -656,15 +684,15 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (!get && strcmp(url, "abortslew")==0) return putEr(s, abortslew());
     if (get && strcmp(url, "canslew")==0) return putErVal(s, ALPACA_OK, canslew());
     if (get && strcmp(url, "canslewasync")==0) return putErVal(s, ALPACA_OK, canslewasync());
-    if (!get && strcmp(url, "slewtocoordinates")==0) return putEr(s, slewtocoordinates(getFloatData(data, "RightAscension"), getFloatData(data, "Declination")));
-    if (!get && strcmp(url, "slewtocoordinatesasync")==0) return putEr(s, slewtocoordinatesasync(getFloatData(data, "RightAscension"), getFloatData(data, "Declination")));
+    if (!get && strcmp(url, "slewtocoordinates")==0) return putEr(s, slewtocoordinates(getFloatDataDef(data, "RightAscension", 0.0f), getFloatDataDef(data, "Declination", 0.0f)));
+    if (!get && strcmp(url, "slewtocoordinatesasync")==0) return putEr(s, slewtocoordinatesasync(getFloatDataDef(data, "RightAscension", 0.0f), getFloatDataDef(data, "Declination", 0.0f)));
     if (get && strcmp(url, "cansync")==0) return putErVal(s, ALPACA_OK, cansync());
-    if (!get && strcmp(url, "synctocoordinates")==0) return putEr(s, synctocoordinates(getFloatData(data, "RightAscension"), getFloatData(data, "Declination")));
+    if (!get && strcmp(url, "synctocoordinates")==0) return putEr(s, synctocoordinates(getFloatDataDef(data, "RightAscension", 0.0f), getFloatDataDef(data, "Declination", 0.0f)));
 
     if (get && strcmp(url, "targetdeclination")==0) return putErVal(s, ALPACA_OK, get_targetdeclination());
-    if (!get && strcmp(url, "targetdeclination")==0) return putEr(s, set_targetdeclination(getFloatData(data, "TargetDeclination")));
+    if (!get && strcmp(url, "targetdeclination")==0) return putEr(s, set_targetdeclination(getFloatDataDef(data, "TargetDeclination", 0.0f)));
     if (get && strcmp(url, "targetrightascension")==0) return putErVal(s, ALPACA_OK, get_targetrightascension());
-    if (!get && strcmp(url, "targetrightascension")==0) return putEr(s, set_targetrightascension(getFloatData(data, "TargetRightAscension")));
+    if (!get && strcmp(url, "targetrightascension")==0) return putEr(s, set_targetrightascension(getFloatDataDef(data, "TargetRightAscension", 0.0f)));
     if (get && strcmp(url, "slewtotarget")==0) return putErVal(s, ALPACA_OK, slewtotarget());
     if (get && strcmp(url, "slewtotargetasync")==0) return putErVal(s, ALPACA_OK, slewtotargetasync());
     if (!get && strcmp(url, "synctotarget")==0) return putErVal(s, ALPACA_OK, synctotarget());
@@ -675,9 +703,9 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "canslewaltaz")==0) return putErVal(s, ALPACA_OK, canslewaltaz());
     if (get && strcmp(url, "canslewaltazasync")==0) return putErVal(s, ALPACA_OK, canslewaltazasync());
     if (get && strcmp(url, "cansyncaltaz")==0) return putErVal(s, ALPACA_OK, cansyncaltaz());
-    if (!get && strcmp(url, "slewtoaltaz")==0) return putEr(s, slewtoaltaz(getFloatData(data, "Azimuth"), getFloatData(data, "Altitude")));
-    if (!get && strcmp(url, "slewtoaltazasync")==0) return putEr(s, slewtoaltazasync(getFloatData(data, "Azimuth"), getFloatData(data, "Altitude")));
-    if (!get && strcmp(url, "synctoaltaz")==0) return putEr(s, synctoaltaz(getFloatData(data, "Azimuth"), getFloatData(data, "Altitude")));
+    if (!get && strcmp(url, "slewtoaltaz")==0) return putEr(s, slewtoaltaz(getFloatDataDef(data, "Azimuth", 0.0f), getFloatDataDef(data, "Altitude", 0.0f)));
+    if (!get && strcmp(url, "slewtoaltazasync")==0) return putEr(s, slewtoaltazasync(getFloatDataDef(data, "Azimuth", 0.0f), getFloatDataDef(data, "Altitude", 0.0f)));
+    if (!get && strcmp(url, "synctoaltaz")==0) return putEr(s, synctoaltaz(getFloatDataDef(data, "Azimuth", 0.0f), getFloatDataDef(data, "Altitude", 0.0f)));
     if (get && strcmp(url, "altitude")==0) { float v=0.0f; return putErVal(s, altitude(v), v); }
     if (get && strcmp(url, "azimuth")==0) { float v=0.0f; return putErVal(s, azimuth(v), v); }
 
@@ -687,7 +715,7 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "cansetpierside")==0) return putErVal(s, ALPACA_OK, cansetpierside());
     if (get && strcmp(url, "sideofpier")==0) return putErVal(s, ALPACA_OK, get_sideofpier());
     if (!get && strcmp(url, "sideofpier")==0) return putEr(s, set_sideofpier(getIntData(data, "SideOfPier")));
-    if (get && strcmp(url, "destinationsideofpier")==0) return putErVal(s, ALPACA_OK, destinationsideofpier(getFloatData(data, "RightAscension"), getFloatData(data, "Declination")));
+    if (get && strcmp(url, "destinationsideofpier")==0) return putErVal(s, ALPACA_OK, destinationsideofpier(getFloatDataDef(data, "RightAscension", 0.0f), getFloatDataDef(data, "Declination", 0.0f)));
 
     if (get && strcmp(url, "siderealtime")==0) { float v=0.0f; return putErVal(s, siderealtime(v), v); }
     if (get && strcmp(url, "utcdate")==0) { char b[30]; return putErVal(s, get_utcdate(b), b); }
@@ -695,7 +723,7 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
 
     if (get && strcmp(url, "axisrates")==0) { char b[50]; return putErValRaw(s, axisrates(getIntData(data, "Axis"), b), b); }
     if (get && strcmp(url, "canmoveaxis")==0) return putErVal(s, ALPACA_OK, canmoveaxis(getIntData(data, "Axis")));
-    if (!get && strcmp(url, "moveaxis")==0) return putEr(s, moveaxis(getIntData(data, "Axis"), getFloatData(data, "Rate")));
+    if (!get && strcmp(url, "moveaxis")==0) return putEr(s, moveaxis(getIntData(data, "Axis"), getFloatDataDef(data, "Rate", 0.0f)));
 
     return CAlpacaDevice::dispatch(get, url, data, s);
 }
@@ -707,7 +735,7 @@ static int8_t const dpm[]={31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 TAlpacaErr CTelescope::set_utcdate(char const* B) // Here we save the time given by the PC (accurate to 1s for the moment) and make a delta with our ms clock...
 {
     char b2[100]; getHtmlString(B, b2, int(sizeof(b2))); char const *b= b2;
-    int Y, M, D, h, m, s, ms;
+    int Y, M, D, h, m, s;
     if (!readInt(b, Y)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='-') return ALPACA_ERR_INVALID_VALUE; if (Y<2024 || Y>2099) return ALPACA_ERR_INVALID_VALUE; Y-=2024;
     if (!readInt(b, M)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='-') return ALPACA_ERR_INVALID_VALUE; if (M<1 || M>12) return ALPACA_ERR_INVALID_VALUE;
     if (!readInt(b, D)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='T') return ALPACA_ERR_INVALID_VALUE; if (D<1 || D>31) return ALPACA_ERR_INVALID_VALUE;
@@ -726,7 +754,7 @@ TAlpacaErr CTelescope::get_utcdate(char* b) // here we add our ms clock to the d
     uint64_t now= UTCTimeDelta*1000+Milisecond();
     int Y, M, D, h, m, s, ms;
     h= now%(24*3600*1000);
-    D= now/(24*3600*1000);
+    D= int(now/(24*3600*1000));
     ms= h%1000; h/= 1000;
     s= h%60; h/=60;
     m= h%60; h/=60;
@@ -752,7 +780,7 @@ bool CFocuser::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "ismoving") == 0) return putErVal(s, ALPACA_OK, get_ismoving());
     if (get && strcmp(url, "tempcomp") == 0) { bool comp= false; return putErVal(s, get_tempcomp(&comp), comp); }
     if (get && strcmp(url, "tempcompavailable") == 0) return putErVal(s, ALPACA_OK, get_tempcompavailable());
-    if (get && strcmp(url, "temperature") == 0) { double temp= 0.0f; return putErVal(s, get_temperature(&temp), temp); }
+    if (get && strcmp(url, "temperature") == 0) { float temp= 0.0f; return putErVal(s, get_temperature(&temp), temp); }
 
     if (!get && strcmp(url, "tempcomp") == 0) return putEr(s, put_tempcomp(getBoolData(data, "TempComp")));
     if (!get && strcmp(url, "halt") == 0) return putEr(s, put_halt());
@@ -775,7 +803,7 @@ bool CFilterWheel::dispatch(bool get, char const *url, char *data, CMyStr *s)
 // These is the http handeling for rotator.The basic dispatch for all commands
 bool CRotator::dispatch(bool get, char const *url, char *data, CMyStr *s)
 {
-    bool b=false; double v=0.0;
+    bool b=false; float v=0.0;
     if (get && strcmp(url, "canreverse") == 0) return putErVal(s, get_canreverse(&b), b);
     if (get && strcmp(url, "reverse") == 0) return putErVal(s, get_reverse(&b), b);
     if (!get && strcmp(url, "reverse") == 0) return putEr(s, put_reverse(getBoolData(data, "Reverse")));
@@ -783,11 +811,11 @@ bool CRotator::dispatch(bool get, char const *url, char *data, CMyStr *s)
     if (get && strcmp(url, "ismoving") == 0) return putErVal(s, get_ismoving(&b), b);
     if (get && strcmp(url, "position") == 0) return putErVal(s, get_position(&v), v);
     if (get && strcmp(url, "mechanicalposition") == 0) return putErVal(s, get_mechanicalposition(&v), v);
-    if (!get && strcmp(url, "sync") == 0) return putEr(s, put_sync(getFloatData(data, "Position")));
+    if (!get && strcmp(url, "sync") == 0) return putEr(s, put_sync(getFloatDataDef(data, "Position", 0.0f)));
     if (get && strcmp(url, "targetposition") == 0) return putErVal(s, get_targetposition(&v), v);
-    if (!get && strcmp(url, "move") == 0) return putEr(s, put_move(getFloatData(data, "Position")));
-    if (!get && strcmp(url, "moveabsolute") == 0) return putEr(s, put_moveabsolute(getFloatData(data, "Position")));
-    if (!get && strcmp(url, "movemechanical") == 0) return putEr(s, put_movemechanical(getFloatData(data, "Position")));
+    if (!get && strcmp(url, "move") == 0) return putEr(s, put_move(getFloatDataDef(data, "Position")));
+    if (!get && strcmp(url, "moveabsolute") == 0) return putEr(s, put_moveabsolute(getFloatDataDef(data, "Position")));
+    if (!get && strcmp(url, "movemechanical") == 0) return putEr(s, put_movemechanical(getFloatDataDef(data, "Position")));
     return CAlpacaDevice::dispatch(get, url, data, s);
 }
 
@@ -795,7 +823,7 @@ bool CRotator::dispatch(bool get, char const *url, char *data, CMyStr *s)
 // These is the http handeling for switches.The basic dispatch for all commands
 bool CSwitch::dispatch(bool get, char const *url, char *data, CMyStr *s)
 {
-    int32_t id=getIntData(data, "Id"), vi=0; bool vb=false; double vd=0.0;
+    int32_t id=getIntData(data, "Id"), vi=0; bool vb=false; float vd=0.0;
     char b[256];
     if (get && strcmp(url, "maxswitch") == 0) return putErVal(s, get_maxswitch(&vi), vi);
 
@@ -810,14 +838,14 @@ bool CSwitch::dispatch(bool get, char const *url, char *data, CMyStr *s)
 
     if (get && strcmp(url, "switchstep") == 0) return putErVal(s, get_switchstep(id, &vd), vd);
     if (get && strcmp(url, "getswitchvalue") == 0) return putErVal(s, get_getswitchvalue(id, &vd), vd);
-    if (!get && strcmp(url, "setswitchvalue") == 0) return putEr(s, put_setswitchvalue(id, getFloatData(data, "Value")));
+    if (!get && strcmp(url, "setswitchvalue") == 0) return putEr(s, put_setswitchvalue(id, getFloatDataDef(data, "Value")));
     if (get && strcmp(url, "minswitchvalue") == 0) return putErVal(s, get_minswitchvalue(id, &vd), vd);
     if (get && strcmp(url, "maxswitchvalue") == 0) return putErVal(s, get_maxswitchvalue(id, &vd), vd);
 
     
     if (get && strcmp(url, "canasync") == 0) return putErVal(s, get_canasync(id, &vb), vb);
     if (!get && strcmp(url, "setasync") == 0) return putEr(s, put_setasync(id, getBoolData(data, "State")));
-    if (!get && strcmp(url, "setasyncvalue") == 0) return putEr(s, put_setasyncvalue(id, getFloatData(data, "Value")));
+    if (!get && strcmp(url, "setasyncvalue") == 0) return putEr(s, put_setasyncvalue(id, getFloatDataDef(data, "Value")));
     if (get && strcmp(url, "statechangecomplete") == 0) return putErVal(s, get_statechangecomplete(id, &vb), vb);
 
     return CAlpacaDevice::dispatch(get, url, data, s);
@@ -856,9 +884,9 @@ bool CCoverCalibrator::dispatch(bool get, char const *url, char *data, CMyStr *s
 // These is the http handeling for ObservingConditions.The basic dispatch for all commands
 bool CObservingConditions::dispatch(bool get, char const *url, char *data, CMyStr *s)
 {
-    double v= 0.0; 
+    float v= 0.0; 
     if (get && strcmp(url, "averageperiod") == 0) return putErVal(s, get_averageperiod(&v), v);
-    if (!get && strcmp(url, "averageperiod") == 0) return putEr(s, put_averageperiod(getFloatData(data, "AveragePeriod")));
+    if (!get && strcmp(url, "averageperiod") == 0) return putEr(s, put_averageperiod(getFloatDataDef(data, "AveragePeriod")));
 
     if (get && strcmp(url, "cloudcover") == 0) return putErVal(s, get_cloudcover(&v), v);
     if (get && strcmp(url, "dewpoint") == 0) return putErVal(s, get_dewpoint(&v), v);
@@ -926,20 +954,22 @@ static const char basicSetupPage[]=
 "		<title>Alpaca server setup</title>"
 "	</head>"
 "	<body>"
-"		<h1>Alpaca server setup</h1>"
+"		<h1>Alpaca devices on this system</h1>";
+
+static const char basicSetupPage2[]=
+"		<h1>Setup for this Alpaca system</h1>"
 "		<form action=\"/setup\">"
 "			<table align=\"center\">"
+"				<tr><td align=\"right\"><label for=\"fname\">System name:</label></td>"
+"					<td><input type=\"text\" id=\"fname\" name=\"fname\" value=\"%s\"></td></tr>"
 "				<tr><td align=\"right\"><label for=\"wifi\">WiFi network name:</label></td>"
 "					<td><input type=\"text\" id=\"wifi\" name=\"wifi\" value=\"%s\"></td></tr>"
 "				<tr><td align=\"right\"><label for=\"wifip\">WiFi password:</label></td>"
 "					<td><input type=\"text\" id=\"wifip\" name=\"wifip\"></td></tr>"
-"				<tr><td align=\"right\"><label for=\"fname\">Device name:</label></td>"
-"					<td><input type=\"text\" id=\"fname\" name=\"fname\" value=\"%s\"></td></tr>"
 "				<tr><td align=\"right\"><label for=\"location\">Location:</label></td>"
 "					<td><input type=\"text\" id=\"location\" name=\"location\" value=\"%s\"></td></tr>"
 "			</table><br><input type=\"submit\" value=\"Submit\">"
-"		</form>"
-"		<h1>Alpaca devices setup</h1>";
+"		</form>";
 
 static const char closeBodyStyleCloseHtml[]="</body>"
         "<style>"
@@ -961,22 +991,52 @@ bool CAlpaca::setup(int sock, bool get, char *data)
         saveLoadEnd();
     }
     CMyStr s;
-    s.printf(basicSetupPage, wifi, ServerName, Location); // add basic setup header
-    for (int i=0; i<nbDevices; i++) // add links to setup for all devices...
+    s.printf(basicSetupPage);
+    for (int i=0; i<nbDevices; i++)
         s.printf("<h2><a href=\"setup/v1/%s/%d/setup\">%s %d:%s %s</a></h2>", devices[i]->get_type(), devices[i]->id, devices[i]->get_type(), devices[i]->id, devices[i]->get_name(), devices[i]->get_description());
     s+="</form>"; s+= closeBodyStyleCloseHtml;
+    s.printf(basicSetupPage2, ServerName, wifi, Location);
     char t[sizeof(httpHtmlHeader)+10]; strcpy(t, httpHtmlHeader);
     char *e= t+strlen(t); _itoa(int(s.w), e, 10); strcat(e,"\r\n\r\n");
-    send(sock, t, int(strlen(t)), 0); // send header + add data length + crlf
-    send(sock, s.c, int(s.w), 0);     // send data...
+    send(sock, t, int(strlen(t)), 0);
+    send(sock, s.c, int(s.w), 0);
     return true;
 }
 
 // This is the html/http handeling of device setup pages...
 static const char basicDeviceSetupPage[]=
-"<html><head><meta name=\"viewport\" http-equiv=\"content-type\" content=\"text/html; charset=UTF-8,width=device-width, initial-scale=1.0\"><title>Alpaca %s setup</title></head><body>"
-"<h1><a href=\"/setup\">Main setup</a></h1>"
-"<h1>Alpaca %s %d:%s %s setup</h1>"
+"<html><head><meta name=\"viewport\" http-equiv=\"content-type\" content=\"text/html; charset=UTF-8,width=device-width, initial-scale=1.0\"><title>%s setup</title>"
+"<style>"
+"/* Conteneur principal */"
+".tabs-container { display: flex; flex-wrap: wrap; max-width: 600px; margin: 0 auto; }"
+""
+"/* On cache les boutons radio */"
+".tab-logic { display: none; }"
+""
+".tab-label { "
+"padding: 10px 20px; background: black; color: green; cursor: pointer; "
+"border: 1px solid #ccc; margin-right: 2px; order: 1; /* Force l'alignement en haut */"
+"}"
+""
+"/* Le style du contenu */"
+".tab-content { "
+"width: 100%%; display: none; order: 2; /* Force l'affichage sous les labels */"
+"padding: 20px; border: 1px solid #ccc; background: black;"
+"}"
+""
+".tab-logic:checked + .tab-label { background: lightgray; font-weight: bold; border-bottom: none; }"
+".tab-logic:checked + .tab-label + .tab-content { display: block; }"
+""
+"table { width: 100%%; margin: 20px auto; border-collapse: collapse; }"
+"td, th { border: 1px solid #ddd; padding: 8px; }"
+"</style>"
+"</head><body>"
+"<h2 align=\"left\"><a href=\"/setup\">Main setup</a></h1>"
+"<h1>%s %d:%s (%s)</h1>"
+"<div class=\"tabs-container\">"
+"<input type=\"radio\" name=\"mon_groupe\" id=\"t1\" class=\"tab-logic\" checked>"
+"<label for=\"t1\" class=\"tab-label\">Alpaca Setup</label>"
+"<div class=\"tab-content\">"
 "<form action=\"/setup/v1/%s/%d/setup\">"
 "<table align=\"center\">"
 "  <tr><td align=\"right\"><label for=\"name\">name:</label></td>"
@@ -984,32 +1044,62 @@ static const char basicDeviceSetupPage[]=
 "  <tr><td align=\"right\"><label for=\"description\">description:</label></td>"
 "      <td><input type=\"text\" id=\"description\" name=\"description\" value=\"%s\"></td></tr></table>"
 "  <input type=\"submit\" value=\"Submit\">"
-"</form>";
+"</form>"
+"</div>";
+
 bool CAlpacaDevice::setup(CAlpaca *Alpaca, int sock, bool get, char *data)
 {
     if (data!=nullptr)
-    {   // case where we are asked to change the name or description for the device
-        char const *d; 
-        d= getStrData(data, "name"); if (d!=nullptr) Alpaca->save(keyHeader, "Name", getHtmlString(d, Name, sizeof(Name)));
-        d= getStrData(data, "description"); if (d!=nullptr) Alpaca->save(keyHeader, "Description", getHtmlString(d, Description, sizeof(Description)));
+    {   
+        char const *d; char t[30]; 
+        strcpy(t, keyHeader); strcat(t, "Name");        d= getStrData(data, "name"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, Name, sizeof(Name)));
+        strcpy(t, keyHeader); strcat(t, "Description"); d= getStrData(data, "description"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, Description, sizeof(Description)));
     }
-    // create html page...
     CMyStr s;
     s.printf(basicDeviceSetupPage, get_type(), get_type(), id, get_name(), get_description(), get_type(), id, get_name(), get_description());
-    subSetup(Alpaca, sock, get, data, s); // call sub-setup (allows you to add things there!)
+    subSetup(Alpaca, sock, get, data, s);
     s+= closeBodyStyleCloseHtml;
     char t[sizeof(httpHtmlHeader)+10]; strcpy(t, httpHtmlHeader);
     char *e= t+strlen(t); _itoa(int(s.w), e, 10); strcat(e,"\r\n\r\n");
-    send(sock, t, int(strlen(t)), 0); // send header + data length + crlf...
-    send(sock, s.c, int(s.w), 0);     // send data...
+    send(sock, t, int(strlen(t)), 0);
+    send(sock, s.c, int(s.w), 0);
     return true;
 }
 
-// generation of focuser specific setup html...
+static size_t erasePos(char *savedPosString, char const *inname, char *name) // d is a pointer on the non sanitized name given by the user. name will contain the sanitized name (20 chr max with 0) returns the length of the string!
+{
+    int i; for (i=0; i<19; i++) if (*inname<'#' || *inname>'z') break; else name[i]= *inname++; name[i]= 0; // extract name
+    size_t l= strlen(savedPosString); if (l>0 && savedPosString[l-1]!='!') { savedPosString[l-1]= '!'; l++; } // make sure ends with !
+    // find existing name in the list...
+    char *d= savedPosString;
+    while (true)
+    {
+        int l1= 0; while (d[l1]!=0 && d[l1]!='!') l1++; if (d[l1]==0) return l; // find end of token, or end of string...
+        if (memcmp(d, name, i)!=0 || d[i]!=' ') { d+= l1+1; continue; } // nope, not the right one, next one...
+        strcpy(d, d+l1+1);             // erase current item...
+        return strlen(savedPosString); // and return...
+    }
+}
+
+void CFocuser::eraseSavedPos(CAlpaca *Alpaca, char const *name)
+{
+    char *savedPosString= getSavedPos(Alpaca);
+    char t[21]; erasePos(savedPosString, name, t); // erase the existing version of this (if exists)
+    Alpaca->save(keyHeader, "savedPos", savedPosString); // and save
+}
+void CFocuser::setSavedPos(CAlpaca *Alpaca, char const *name)
+{
+    char *savedPosString= getSavedPos(Alpaca);
+    char t[21]; size_t l= erasePos(savedPosString, name, t); // erase the existing version of this (if exists)
+    sprintf(savedPosString+l, "%s %d!", name, int(get_position())); // add current post at end of string
+    Alpaca->save(keyHeader, "savedPos", savedPosString); // and save
+}
+
 void CFocuser::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
 {
     if (data!=nullptr)
-    {   //commands to move to using steps or distance...
+    {   
+        // handle inboud move
         char const *d= getStrData(data, "position");
         if (d!=nullptr && *d>='0' && *d<='9') put_move(readInt(d));
         d= getStrData(data, "Distance");
@@ -1019,9 +1109,25 @@ void CFocuser::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr 
             f=f*1000.0f/get_stepsize();
             put_move(int(f));
         }
+
+        // handle save /erase position...
+        d= getStrData(data, "posname"); if (d!=nullptr) setSavedPos(Alpaca, d);
+        d= getStrData(data, "erasePos"); if (d!=nullptr) eraseSavedPos(Alpaca, d);
+
+        float vf;
+        if (getFloatData(data, "stepSize", vf)) set_stepSize(Alpaca, vf);
+        int vi;
+        if (getIntData(data, "MaxSteps", vi)) set_maxSteps(Alpaca, vi);
+        if (getIntData(data, "maxSpeed", vi)) set_maxSpeed(Alpaca, vi);
+        if (getIntData(data, "acceleration", vi)) set_msToMaxSpeed(Alpaca, vi);
+        if (getIntData(data, "invertDirection", vi)) set_motorDirection(Alpaca, vi);
     }
-    if (data!=nullptr && data[0]==0) put_halt(); // stop cases...
-    s.printf("<h1>Position</h1>" // allows the user to go to position
+    // handle inbound stop
+    if (data!=nullptr && data[0]==0) put_halt();
+    s.printf( // goto and stop controls
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t2\" class=\"tab-logic\">"
+        "<label for=\"t2\" class=\"tab-label\">Position</label>"
+        "<div class=\"tab-content\">"
             "<table align=\"center\">"
             "<form action=\"/setup/v1/%s/%d/setup\">"
             "  <tr><td align=\"right\"><label for=\"position\">position:</label></td>"
@@ -1030,216 +1136,116 @@ void CFocuser::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr 
             "</form>"
             "<form action=\"/setup/v1/%s/%d/setup\">"
             "  <tr><td align=\"right\"><label for=\"Distance\">Distance(mm):</label></td>"
-            "      <td><input type=\"text\" id=\"Distance\" name=\"Distance\" value=\"%3f\"></td>"
+            "      <td><input type=\"text\" id=\"Distance\" name=\"Distance\" value=\"%.3f\"></td>"
             "      <td><input type=\"submit\" value=\"GoTo\"></td></tr>"
             "</form>"
             "</table>"
             "<form action=\"/setup/v1/%s/%d/setup\">"
             "  <input type=\"submit\" value=\"Stop\">"
             "</form>"
+        "</div>"
         , get_type(), id, get_position(), get_type(), id, float(get_position()*get_stepsize()/1000.0f), get_type(), id);
-        if (get_ismoving()) // add auto refresh if the focuser is moving...
-            s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
-}
 
-// generation of filter wheel specific setup html...
+    s.printf( // saved position table
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t3\" class=\"tab-logic\">"
+        "<label for=\"t3\" class=\"tab-label\">Save Pos</label>"
+        "<div class=\"tab-content\">"
+            "<table align=\"center\">"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <tr><td align=\"right\"><label for=\"posname\">save position %d as:</label></td>"
+            "      <td><input type=\"text\" id=\"posname\" name=\"posname\" value=\"\"></td>"
+            "      <td><input type=\"submit\" value=\"save\"></td></tr>"
+            "</form></table>", get_type(), id);
+    char *S= getSavedPos(Alpaca); bool hasone= false;
+    while (*S!=0)
+    {
+        char name[20]; int i; for (i=0; i<19; i++) if (*S<=' ') break; else name[i]= *S++; name[i]= 0; if (*S==' ') S++;
+        char pos[20]; int j; for (j=0; j<19; j++) if (*S<='!') break; else pos[j]= *S++; pos[j]= 0; if (*S=='!') S++;
+        if (i==0 || j==0) break;
+        if (!hasone) { s+="<table align=\"center\">"; hasone= true; }
+        s.printf("<tr><th><form action=\"/setup/v1/%s/%d/setup\">"
+            "  <label for=\"position\">%s:</label>"
+            "  <input type=\"text\" id=\"position\" name=\"position\" value=\"%s\">"
+            "  <input type=\"submit\" value=\"GoTo\">"
+            "</form></th>"
+            "<th><form action=\"/setup/v1/%s/%d/setup\">"
+            "  <input type=\"hidden\" id=\"erasePos\" name=\"erasePos\" value=\"%s\">"
+            "  <input type=\"submit\" value=\"Erase\">"
+            "</form></th></tr>"
+            , get_type(), id, name, pos, get_type(), id, name);
+    }
+    if (hasone) s+= "</table>";
+    s+= "</div>";
+
+    if (maxSpeed!=-1)
+        s.printf( // motor setup
+            "<input type=\"radio\" name=\"mon_groupe\" id=\"t4\" class=\"tab-logic\">"
+            "<label for=\"t4\" class=\"tab-label\">Motor setup</label>"
+            "<div class=\"tab-content\">"
+                "<form action=\"/setup/v1/%s/%d/setup\">"
+                    "<table align=\"center\">"
+                    "  <tr><td align=\"right\"><label for=\"stepSize\">step size in microns:</label></td>"
+                    "      <td><input type=\"text\" id=\"stepSize\" name=\"stepSize\" value=\"%.3f\"></td>"
+                    "  <tr><td align=\"right\"><label for=\"MaxSteps\">Max Steps:</label></td>"
+                    "      <td><input type=\"text\" id=\"MaxSteps\" name=\"MaxSteps\" value=\"%d\"></td>"
+                    "  <tr><td align=\"right\"><label for=\"maxSpeed\">max speed in steps/s:</label></td>"
+                    "      <td><input type=\"text\" id=\"maxSpeed\" name=\"maxSpeed\" value=\"%d\"></td>"
+                    "  <tr><td align=\"right\"><label for=\"acceleration\">time, in ms, to reach full speed:</label></td>"
+                    "      <td><input type=\"text\" id=\"acceleration\" name=\"acceleration\" value=\"%d\"></td>"
+                    "  <tr><td align=\"right\"><label for=\"invertDirection\">non-0 if inverted direction</label></td>"
+                    "      <td><input type=\"text\" id=\"invertDirection\" name=\"invertDirection\" value=\"%d\"></td>"
+                    "</table>"
+                    "  <input type=\"submit\" value=\"submit\">"
+                "</form>"
+            "</div>"
+            , get_type(), id, get_stepsize(), get_maxstep(), maxSpeed, msToMaxSpeed, motorDirection);
+    s+= "<script>document.getElementById('t2').checked = true;</script>";
+    if (get_ismoving())
+            s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
+ }
+
 void CFilterWheel::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
 {
     if (data!=nullptr)
-    {   // handle the change in position and the naming of the various filters...
+    {   
         char const *d= getStrData(data, "position");
         if (d!=nullptr && *d>='0' && *d<='9') put_position(readInt(d));
-        d= getStrData(data, "names"); if (d!=nullptr) Alpaca->save(keyHeader, "names", getHtmlString(d, names, sizeof(names)));
-        d= getStrData(data, "focusoffsets"); if (d!=nullptr) Alpaca->save(keyHeader, "focusoffsets", getHtmlString(d, focusoffsets, sizeof(focusoffsets)));
+        char t[30]; 
+        strcpy(t, keyHeader); strcat(t, "names");        d= getStrData(data, "names"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, names, sizeof(names)));
+        strcpy(t, keyHeader); strcat(t, "focusoffsets"); d= getStrData(data, "focusoffsets"); if (d!=nullptr) Alpaca->save(t, getHtmlString(d, focusoffsets, sizeof(focusoffsets)));
     }
-    // the setup html...
-    s.printf("<h1>Setup</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "<table align=\"center\">"
-            "  <tr><td align=\"right\"><label for=\"names\">names (['name1','name2'...]):</label></td>"
-            "  <td><input type=\"text\" id=\"names\" name=\"names\" value=\"%s\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"focusoffsets\">focus offsets ([0,0...]):</label></td>"
-            "  <td><input type=\"text\" id=\"focusoffsets\" name=\"focusoffsets\" value=\"%s\"></td></tr>"
-            "</table>"
-            "  <input type=\"submit\" value=\"Submit\">"
-            "</form>"
-            "<h1>Set Filter</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <label for=\"position\">position:</label>"
-            "  <input type=\"text\" id=\"position\" name=\"position\" value=\"%d\">"
-            "  <input type=\"submit\" value=\"Set Wheel\">"
-            "</form>"
-            "<h1><a href=\"/setup/v1/%s/%d/setup\">Refresh</a></h1>"
-        , get_type(), id, names, focusoffsets, get_type(), id, get_position(), get_type(), id);
-}
 
-// generation of telescope  specific setup html...
-void CTelescope::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
-{
-    if (data!=nullptr)
-    {   // handle commands...
-        float ra= getFloatData(data,"RA", 1000.0f);
-        float dec= getFloatData(data,"Dec", 1000.0f);
-        if (ra!=1000.0f && dec!=1000.0f) slewtocoordinates(ra, dec);
+    s.printf( // saved positions
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t2\" class=\"tab-logic\">"
+        "<label for=\"t2\" class=\"tab-label\">Change Filter</label>"
+        "<div class=\"tab-content\">"
+        "<form action=\"/setup/v1/%s/%d/setup\">"
+        "  <label for=\"position\">position:</label>"
+        "  <input type=\"text\" id=\"position\" name=\"position\" value=\"%d\">"
+        "  <input type=\"submit\" value=\"Set Wheel\">"
+        "  <p>%s</p>"
+        "</form>"
+        "<h1><a href=\"/setup/v1/%s/%d/setup\">Refresh</a></h1>"
+        "</div>"
+        ,get_type(), id, get_position(), names, get_type(), id);
 
-        float sra= getFloatData(data,"SRA", 1000.0f);
-        float sdec= getFloatData(data,"SDec", 1000.0f);
-        if (sra!=1000.0f && sdec!=1000.0f) synctocoordinates(ra, dec);
-        // or data settings...
-        float Lat= getFloatData(data,"Lat", 1000.0f);   if (Lat!=1000.0f) set_sitelatitude(Lat);
-        float Long= getFloatData(data,"Long", 1000.0f); if (Long!=1000.0f) set_sitelongitude(Long);
-        float Elev= getFloatData(data,"Elev", -1.0f);   if (Elev!=-1.0f) set_siteelevation(Elev);
-        float Foc= getFloatData(data,"Foc", -1.0f);     if (Foc!=-1.0f) set_focallength(Foc);
-        float Diam= getFloatData(data,"Diam", -1.0f);   if (Diam!=-1.0f) set_aperturediameter(Diam);
-        float App= getFloatData(data,"App", -1.0f);     if (App!=-1.0f) set_aperturearea(App);
-    }
-    if (data!=nullptr && data[0]==0) abortslew(); // stop movement!
-    // generation of the html
-    char ra[20]; floatToRa(rightascension(), ra);
-    char dec[20]; floatToDec(declination(), dec);
-    s.printf("<h1>Position</h1>"
-            "<table align=\"center\">"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"RA\">Ra:</label></td>"
-            "      <td><input type=\"text\" id=\"RA\" name=\"RA\" value=\"%s\"></td>"
-            "  <td align=\"right\"><label for=\"Dec\">Dec:</label></td>"
-            "      <td><input type=\"text\" id=\"Dec\" name=\"Dec\" value=\"%s\"></td>"
-            "      <td><input type=\"submit\" value=\"GoTo\"></td></tr>"
-            "</form>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"SRA\">Ra:</label></td>"
-            "      <td><input type=\"text\" id=\"SRA\" name=\"SRA\" value=\"%s\"></td>"
-            "  <td align=\"right\"><label for=\"SDec\">Dec:</label></td>"
-            "      <td><input type=\"text\" id=\"SDec\" name=\"SDec\" value=\"%s\"></td>"
-            "      <td><input type=\"submit\" value=\"Sync\"></td></tr>"
-            "</form>"
-            "</table>"
+    s+= "<script>document.getElementById('t2').checked = true;</script>";
 
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <input type=\"submit\" value=\"Stop\">"
-            "</form>"
-
-            "<h1>Material</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "<table align=\"center\">"
-            "  <tr><td align=\"right\"><label for=\"Lat\">Latitude:</label></td>"
-            "      <td><input type=\"text\" id=\"Lat\" name=\"Lat\" value=\"%6f\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"Long\">Longitude:</label></td>"
-            "      <td><input type=\"text\" id=\"Long\" name=\"Long\" value=\"%6f\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"Elev\">Elevation:</label></td>"
-            "      <td><input type=\"text\" id=\"Elev\" name=\"Elev\" value=\"%6f\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"Foc\">Focal Length:</label></td>"
-            "      <td><input type=\"text\" id=\"Foc\" name=\"Foc\" value=\"%6f\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"Diam\">Diameter:</label></td>"
-            "      <td><input type=\"text\" id=\"Diam\" name=\"Diam\" value=\"%6f\"></td></tr>"
-            "  <tr><td align=\"right\"><label for=\"App\">Apperture Area:</label></td>"
-            "      <td><input type=\"text\" id=\"App\" name=\"App\" value=\"%6f\"></td></tr>"
-            "</table>"
-            "<input type=\"submit\" value=\"Update\">"
-            "</form>",
-        get_type(), id, ra, dec, get_type(), id, ra, dec, get_type(), id, // goto, sync, stop
-        get_type(), id, get_sitelatitude(), get_sitelongitude(), get_siteelevation(), get_focallength(), get_aperturediameter(), get_aperturearea());
-        if (slewing()) s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
-}
-
-// generation of rotator specific setup html...
-void CRotator::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
-{
-    if (data!=nullptr)
-    {   //commands to move to using steps or distance...
-        float v= getFloatData(data,"sync", 1000.0f); if (v!=1000.0f) put_sync(v);
-        v= getFloatData(data,"goto", 1000.0f); if (v!=1000.0f) put_moveabsolute(v);
-        v= getFloatData(data,"reverse", 1000.0f); if (v!=1000.0f) put_reverse(v!=0.0f);
-    }
-    if (data!=nullptr && data[0]==0) put_halt(); // stop cases...
-    double pos; get_position(&pos);
-    bool reverse; get_reverse(&reverse);
-    s.printf("<h1>Position</h1>" // allows the user to go to position
-            "<table align=\"center\">"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"sync\">angle:</label></td>"
-            "      <td><input type=\"text\" id=\"sync\" name=\"sync\" value=\"%3f\"></td>"
-            "      <td><input type=\"submit\" value=\"Sync\"></td></tr>"
-            "</form>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"goto\">angle:</label></td>"
-            "      <td><input type=\"text\" id=\"goto\" name=\"goto\" value=\"%3f\"></td>"
-            "      <td><input type=\"submit\" value=\"GoTo\"></td></tr>"
-            "</form>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"reverse\">direction reversed:</label></td>"
-            "      <td><input type=\"text\" id=\"reverse\" reverse\" value=\"%d\"></td>"
-            "      <td><input type=\"submit\" value=\"Change\"></td></tr>"
-            "</form>"
-            "</table>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <input type=\"submit\" value=\"Stop\">"
-            "</form>"
-        , get_type(), id, pos, get_type(), id, pos, get_type(), id, reverse?1:0, get_type(), id);
-        bool moving; get_ismoving(&moving); if (moving) // add auto refresh if the focuser is moving...
-            s.printf("<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>", get_type(), id );
-}
-
-// generation of SafetyMonitor specific setup html...
-void CSafetyMonitor::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
-{
-    bool safe; get_issafe(&safe);
-    s.printf("<h1>Status</h1>"
-            "<h2>Device is %s</h2>"
-            "<script> function autoRefresh() { window.location = \"/setup/v1/%s/%d/setup\"; } setInterval('autoRefresh()', 5000);</script>"
-        , safe?"SAFE":"NOT SAFE!!", get_type(), id);
-}
-
-// generation of rotator specific setup html...
-void CSwitch::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
-{
-    if (data!=nullptr)
-    {   //commands to move to using steps or distance...
-        int id= getIntData(data, "Id", -1);
-        float v= getFloatData(data,"set", 10000000.0f);
-        if (v!=10000000.0f) put_setswitchvalue(id, v);
-        // add set names/descriptions...
-
-        char *d;
-        d= getStrData(data, "name"); if (d!=nullptr) put_setswitchname(id, getHtmlString(d, d, strlen(d)));
-        d= getStrData(data, "desc"); if (d!=nullptr) put_setswitchdescription(id, getHtmlString(d, d, strlen(d)));
-    }
-    s+= "<h1>Switches</h1>"
-        "<table align=\"center\">";
-    int32_t nb; get_maxswitch(&nb);
-    for (int i=0; id<nb; i++)
-    {
-        double v; char name[128], desc[256]; get_getswitchvalue(i, &v); get_getswitchname(i, name, sizeof(name)); get_getswitchdescription(i, desc, sizeof(desc));
-        int WARNING; // these names shold be sanitized for html use!!!!
-        s.printf(
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"set\">%d: %s</label></td>"
-            "      <td><input type=\"text\" id=\"set\" name=\"set\" value=\"%5f\"></td>"
-            "      <td><input type=\"hidden\" id=\"Id\" name=\"Id\" value=\"%d\"></td>"
-            "      <td><input type=\"submit\" value=\"change\"></td>"
-            "      <td><label>%s</label></td></tr>"
-            "</form>"
-        , get_type(), id, i, name, v, i, desc);
-    }
-    s+= "</table>";
-
-    s+= "<br><br><h1>Names and descriptions</h1>"
-        "<table align=\"center\">";
-    for (int i=0; id<nb; i++)
-    {
-        char name[128], desc[256]; get_getswitchname(i, name, sizeof(name)); get_getswitchdescription(i, desc, sizeof(desc));
-        int WARNING; // these names shold be sanitized for html use!!!!
-        s.printf(
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td align=\"right\"><label for=\"set\">%d:</label></td>"
-            "      <td><input type=\"text\" id=\"name\" name=\"name\" value=\"%s\"></td>"
-            "      <td><input type=\"text\" id=\"desc\" name=\"desc\" value=\"%s\"></td>"
-            "      <td><input type=\"hidden\" id=\"Id\" name=\"Id\" value=\"%d\"></td>"
-            "      <td><input type=\"submit\" value=\"change\"></td>"
-            "</form>"
-        , get_type(), id, i, name, desc, i);
-    }
-    s+= "</table>";
+    s.printf( // saved positions
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t3\" class=\"tab-logic\">"
+        "<label for=\"t3\" class=\"tab-label\">Filters definition</label>"
+        "<div class=\"tab-content\">"
+        "<form action=\"/setup/v1/%s/%d/setup\">"
+        "<table align=\"center\">"
+        "  <tr><td align=\"right\"><label for=\"names\">names (['name1','name2'...]):</label></td>"
+        "  <td><input type=\"text\" id=\"names\" name=\"names\" value=\"%s\"></td></tr>"
+        "  <tr><td align=\"right\"><label for=\"focusoffsets\">focus offsets ([0,0...]):</label></td>"
+        "  <td><input type=\"text\" id=\"focusoffsets\" name=\"focusoffsets\" value=\"%s\"></td></tr>"
+        "</table>"
+        "  <input type=\"submit\" value=\"Submit\">"
+        "</form>"
+        "</div>"
+        , get_type(), id, names, focusoffsets);
 }
 
 // generation of rotator specific setup html...
@@ -1247,39 +1253,133 @@ void CCoverCalibrator::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data,
 {
     if (data!=nullptr)
     {   //commands to move to using steps or distance...
-        int32_t v= getIntData(data,"calibrateon", -1); if (v!=-1) calibratoron(v);
-        v= getIntData(data, "calibratoroff", -1); if (v!=-1) calibratoroff();
-        v= getIntData(data, "closecover", -1); if (v!=-1) closecover();
-        v= getIntData(data, "opencover", -1); if (v!=-1) opencover();
-        v= getIntData(data, "haltcover", -1); if (v!=-1) haltcover();
+        int32_t v= getIntDataDef(data,"calibrateon", -1); if (v!=-1) calibratoron(v);
+        v= getIntDataDef(data, "calibratoroff", -1); if (v!=-1) calibratoroff();
+        v= getIntDataDef(data, "closecover", -1); if (v!=-1) closecover();
+        v= getIntDataDef(data, "opencover", -1); if (v!=-1) opencover();
+        v= getIntDataDef(data, "haltcover", -1); if (v!=-1) haltcover();
     }
     uint32_t b, mb; get_brightness(&b); get_maxbrightness(&mb);
     bool moving, changing; get_calibratorchanging(&changing); get_covermoving(&moving);
     CoverState cs; get_coverstate(&cs);
     static char const *css[]={"NotPresent", "Closed", "Moving", "Open", "Unknown", "Error"};
-    s.printf("<h1>Calibrator%s</h1>" // allows the user to go to position
+    s.printf(
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t2\" class=\"tab-logic\">"
+        "<label for=\"t2\" class=\"tab-label\">change</label>"
+        "<div class=\"tab-content\">"
+        "<h2>Calibrator%s</h2>" // allows the user to go to position
             "<table align=\"center\">"
             "<form action=\"/setup/v1/%s/%d/setup\">"
             "  <tr><td align=\"right\"><label for=\"calibrateon\">brigthness (max:%d):</label></td>"
-            "      <td><input type=\"text\" id=\"calibrateon\" name=\"calibrateon\" value=\"%ld\"></td>"
-            "      <td><input type=\"submit\" value=\"calibrateon\"></td></tr>"
-            "</form>"
-            "<h1>Cover%s:%s</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td><input type=\"hidden\" id=\"closecover\" name=\"closecover\" value=\"1\"></td>"
-            "      <td><input type=\"submit\" value=\"closecover\"></td></tr>"
-            "</form>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td><input type=\"hidden\" id=\"opencover\" name=\"opencover\" value=\"1\"></td>"
-            "      <td><input type=\"submit\" value=\"opencover\"></td></tr>"
-            "</form>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "  <tr><td><input type=\"hidden\" id=\"haltcover\" name=\"haltcover\" value=\"1\"></td>"
-            "      <td><input type=\"submit\" value=\"haltcover\"></td></tr>"
+            "      <td><input type=\"text\" id=\"calibrateon\" name=\"calibrateon\" value=\"%ld\">"
+            "      <input type=\"submit\" value=\"Set\"></td></tr>"
             "</form>"
             "</table>"
+        "<h2>Cover%s:%s</h2>"
+            "<table align=\"center\"><tr><td align=\"center\">"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <input type=\"hidden\" id=\"closecover\" name=\"closecover\" value=\"1\"><input type=\"submit\" value=\"closecover\">"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <input type=\"hidden\" id=\"opencover\" name=\"opencover\" value=\"1\"><input type=\"submit\" value=\"opencover\">"
+            "</form>"
+            "<form action=\"/setup/v1/%s/%d/setup\">"
+            "  <input type=\"hidden\" id=\"haltcover\" name=\"haltcover\" value=\"1\"><input type=\"submit\" value=\"haltcover\">"
+            "</form>"
+            "</td></tr></table>"
+        "</div>"
         , changing?" (Changing)":"", get_type(), id, mb, b,
-        moving?" (Moving)":"", css[cs], get_type(), id);
+        moving?" (Moving)":"", css[cs], get_type(), id, get_type(), id, get_type(), id);
+    s+= "<script>document.getElementById('t2').checked = true;</script>";
+}
+
+// generation of Telescope specific setup html...
+void CTelescope::subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s)  // This allows you to add stuff in the HTML or handle inputs...
+{
+
+    if (data!=nullptr)
+    {   
+        int v; bool reinit= false;
+        if (getIntData(data,"RaMax", v)) { mount.ra.maxPos= v; reinit= true; }
+        if (getIntData(data,"RaMaxSpd", v)) { mount.ra.maxSpd= v, reinit= true; }
+        if (getIntData(data,"RaAcc", v)) { mount.ra.msToSpd= v, reinit= true; }
+        if (getIntData(data,"RaBack", v)) { mount.ra.Backlash= v, reinit= true; }
+        if (getIntData(data,"RaSettle", v)) { mount.raSettle= v, reinit= true; }
+        if (getIntData(data,"RaAmplitude", v)) { mount.raAmplitude= v, reinit= true; }
+        if (getIntData(data,"DecMax", v)) { mount.dec.maxPos= v, reinit= true; }
+        if (getIntData(data,"DecMaxSpd", v)) { mount.dec.maxSpd= v, reinit= true; }
+        if (getIntData(data,"DecAcc", v)) { mount.dec.msToSpd= v, reinit= true; }
+        if (getIntData(data,"DecBack", v)) { mount.dec.Backlash= v, reinit= true; }
+        if (getIntData(data,"RaInvert", v)) { mount.ra.invert= v, reinit= true; }
+        if (getIntData(data,"DecInvert", v)) { mount.dec.invert= v, reinit= true; }
+
+        if (getIntData(data,"RaGuide", v)) { set_guideraterightascension(v/3600.0f); }
+        if (getIntData(data,"DecGuide", v)) { set_guideratedeclination(v/3600.0f); }
+        if (reinit) { doReinit(); alpaca->save(keyHeader, "mount", (uint8_t*)&mount, sizeof(mount)); }
+
+    }
+    s.printf( // pos, sync goto
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t2\" class=\"tab-logic\">"
+        "<label for=\"t2\" class=\"tab-label\">Goto and Sync</label>"
+        "<div class=\"tab-content\">"
+        "<form action=\"/setup/v1/%s/%d/setup\" method=\"get\">"
+        "<table align=\"center\">"
+        "<tr><td align=\"center\"><label for=\"ra\">ra in decimal form:</label><input type=\"text\" id=\"ra\" name=\"ra\" value=\"%6f\"></td></tr>"
+        "<tr><td align=\"center\"><label for=\"dec\">dec in decimal form:</label><input type=\"text\" id=\"dec\" name=\"dec\" value=\"%6f\"></td></tr>"
+        "<tr><td align=\"center\"><button type=\"submit\" name=\"goto\" value=\"0\">goto</button> <button type=\"submit\" name=\"sync\" value=\"0\">sync</button><button type=\"submit\" name=\"stop\" value=\"0\">stop</button></td></tr>"
+        "</table></form>"
+        "</div>"
+        ,get_type(), id, rightascension(), declination());
+
+    s+= "<script>document.getElementById('t2').checked = true;</script>";
+
+    s.printf(
+        "<input type=\"radio\" name=\"mon_groupe\" id=\"t3\" class=\"tab-logic\">"
+        "<label for=\"t3\" class=\"tab-label\">Motor Setup</label>"
+        "<div class=\"tab-content\">"
+
+        "<form action=\"/setup/v1/%s/%d/setup\">"
+        "<h2>RA Stepper</h2>"
+        "<table align=\"center\">"
+        "  <tr><td align=\"right\"><label for=\"RaMax\">Steps for 360deg:</label></td>"
+        "      <td><input type=\"text\" id=\"RaMax\" name=\"RaMax\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaMaxSpd\">Speed Steps/s:</label></td>"
+        "      <td><input type=\"text\" id=\"RaMaxSpd\" name=\"RaMaxSpd\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaAcc\">Time to full speed in ms:</label></td>"
+        "      <td><input type=\"text\" id=\"RaAcc\" name=\"RaAcc\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaBack\">Backlash in steps:</label></td>"
+        "      <td><input type=\"text\" id=\"RaBack\" name=\"RaBack\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaSettle\">Settle in arcsec:</label></td>"
+        "      <td><input type=\"text\" id=\"RaSettle\" name=\"RaSettle\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaAmplitude\">Amplitude in degree:</label></td>"
+        "      <td><input type=\"text\" id=\"RaAmplitude\" name=\"RaAmplitude\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaGuide\">guide rate in arcs/s:</label></td>"
+        "      <td><input type=\"text\" id=\"RaGuide\" name=\"RaGuide\" value=\"%.1f\"></td>"
+        "  <tr><td align=\"right\"><label for=\"RaInvert\">ra is inverted (0 or 1):</label></td>"
+        "      <td><input type=\"text\" id=\"RaInvert\" name=\"RaInvert\" value=\"%d\"></td>"
+        "</table>"
+        "<h2>Declinaison Stepper</h2>"
+        "<table align=\"center\">"
+        "  <tr><td align=\"right\"><label for=\"DecMax\">Steps for 360deg:</label></td>"
+        "      <td><input type=\"text\" id=\"DecMax\" name=\"DecMax\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"DecMaxSpd\">Speed Steps/s:</label></td>"
+        "      <td><input type=\"text\" id=\"DecMaxSpd\" name=\"DecMaxSpd\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"DecAcc\">Time to full speed in ms:</label></td>"
+        "      <td><input type=\"text\" id=\"DecAcc\" name=\"DecAcc\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"DecBack\">Backlash in steps:</label></td>"
+        "      <td><input type=\"text\" id=\"DecBack\" name=\"DecBack\" value=\"%d\"></td>"
+        "  <tr><td align=\"right\"><label for=\"DecGuide\">guide rate in arcs/s:</label></td>"
+        "      <td><input type=\"text\" id=\"DecGuide\" name=\"DecGuide\" value=\"%.1f\"></td>"
+        "  <tr><td align=\"right\"><label for=\"DecInvert\">dec is inverted (0 or 1):</label></td>"
+        "      <td><input type=\"text\" id=\"DecInvert\" name=\"DecInvert\" value=\"%d\"></td>"
+        "</table>"
+        "<input type=\"submit\" value=\"Update\">"
+        "</form>"
+        "</div>",
+
+        get_type(), id,
+        mount.ra.maxPos, mount.ra.maxSpd, mount.ra.msToSpd, mount.ra.Backlash, mount.raSettle, mount.raAmplitude, get_guideraterightascension()*3600.0f, mount.ra.invert,
+        mount.dec.maxPos, mount.dec.maxSpd, mount.dec.msToSpd, mount.dec.Backlash, get_guideratedeclination()*3600.0f, mount.dec.invert);
 }
 
 // generation of rotator specific setup html...
@@ -1287,42 +1387,49 @@ void CObservingConditions::subSetup(CAlpaca *Alpaca, int sock, bool get, char *d
 {
     if (data!=nullptr)
     {   //commands to move to using steps or distance...
-        float v= getFloatData(data,"averageperiod", -1.0f); if (v!=-1.0f) put_averageperiod(v);
-        int i= getIntData(data, "refresh", -1); if (v!=-1) put_refresh();
+        float v= getFloatDataDef(data,"averageperiod", -1.0f); if (v!=-1.0f) put_averageperiod(v/24.0f/60.0f);
+        int i= getIntDataDef(data, "refresh", -1); if (v!=-1) put_refresh();
     }
-    TAlpacaErr er; double v;
-    er= get_averageperiod(&v);
-    if (er==ALPACA_OK) 
-        s.printf("<table align=\"center\">"
-                "<form action=\"/setup/v1/%s/%d/setup\">"
-                "  <tr><td><input type=\"hidden\" id=\"refresh\" name=\"refresh\" value=\"1\"></td>"
-                "      <td><input type=\"submit\" value=\"refresh\"></td></tr>"
-                "</form></table>"
-            , get_type(), id, v);
-    s+="<h1>Sensors</h1>";
-    er= get_cloudcover(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>cloud cover: %f</h2><br>", v);
-    er= get_dewpoint(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>dewpoint: %f</h2><br>", v);
-    er= get_humidity(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>humidity: %f</h2><br>", v);
-    er= get_pressure(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>pressure: %f</h2><br>", v);
-    er= get_rainrate(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_rainrate: %f</h2><br>", v);
-    er= get_skybrightness(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skybrightness: %f</h2><br>", v);
-    er= get_skyquality(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skyquality: %f</h2><br>", v);
-    er= get_skytemperature(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_skytemperature: %f</h2><br>", v);
-    er= get_starfwhm(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_starfwhm: %f</h2><br>", v);
-    er= get_temperature(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_temperature: %f</h2><br>", v);
-    er= get_winddirection(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_winddirection: %f</h2><br>", v);
-    er= get_windgust(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_windgust: %f</h2><br>", v);
-    er= get_windspeed(&v); if (er==ALPACA_OK) s.printf("<h2 align=\"center/>get_windspeed: %f</h2><br>", v);
+    TAlpacaErr er; float v;
+
+    s+= // list all sensors
+    "<input type=\"radio\" name=\"mon_groupe\" id=\"t2\" class=\"tab-logic\">"
+    "<label for=\"t2\" class=\"tab-label\">Sensor values</label>"
+    "<div class=\"tab-content\">";
+    if (get_cloudcover(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>cloud cover: %.2f</h2><br>", v);
+    if (get_dewpoint(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>dewpoint: %.2f</h2><br>", v);
+    if (get_humidity(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>humidity: %.2f</h2><br>", v);
+    if (get_pressure(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>pressure: %.2f</h2><br>", v);
+    if (get_rainrate(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_rainrate: %.2f</h2><br>", v);
+    if (get_skybrightness(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_skybrightness: %.2f</h2><br>", v);
+    if (get_skyquality(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_skyquality: %.2f</h2><br>", v);
+    if (get_skytemperature(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_skytemperature: %.2f</h2><br>", v);
+    if (get_starfwhm(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_starfwhm: %.2f</h2><br>", v);
+    if (get_temperature(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_temperature: %.2f</h2><br>", v);
+    if (get_winddirection(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_winddirection: %.2f</h2><br>", v);
+    if (get_windgust(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_windgust: %.2f</h2><br>", v);
+    if (get_windspeed(&v)==ALPACA_OK) s.printf("<h2 align=\"center/>get_windspeed: %.2f</h2><br>", v);
+    s.printf("<table align=\"center\">"
+        "<form action=\"/setup/v1/%s/%d/setup\">"
+        "  <tr><td align=\"center\"><input type=\"hidden\" id=\"refresh\" name=\"refresh\" value=\"1\"><input type=\"submit\" value=\"refresh\"></td></tr>"
+        "</form></table>"
+        , get_type(), id);
+    s+= "</div>";
+
+    s+= "<script>document.getElementById('t2').checked = true;</script>";
 
     er= get_averageperiod(&v);
     if (er==ALPACA_OK)
-        s.printf("<table align=\"center\">"
+        s.printf(
+            "<input type=\"radio\" name=\"mon_groupe\" id=\"t3\" class=\"tab-logic\">"
+            "<label for=\"t3\" class=\"tab-label\">refresh rate in minutes</label>"
+            "<div class=\"tab-content\">"
                 "<form action=\"/setup/v1/%s/%d/setup\">"
                 "  <tr><td align=\"right\"><label for=\"averageperiod\">average period:</label></td>"
-                "      <td><input type=\"text\" id=\"averageperiod\" name=\"averageperiod\" value=\"%f\"></td>"
-                "      <td><input type=\"submit\" value=\"averageperiod\"></td></tr>"
+                "      <td><input type=\"text\" id=\"averageperiod\" name=\"averageperiod\" value=\"%.3f\"></td>"
+                "      <td><input type=\"submit\" value=\"Change\"></td></tr>"
                 "</form></table>"
-            , get_type(), id, v);
+            "</div>", get_type(), id, v*24.0f*60.0f);
 }
 
 // should you implement mode types, add the sub-setup here! and send them to me (cyrille.de.brebisson@gmail.com) so that they enrich the system!
@@ -1417,6 +1524,15 @@ void CAlpaca::save(char const* key, char const* v)
     saveLoadHandleDirty = true;
     saveLoadEnd();
 }
+void CAlpaca::save(char const *key, uint8_t const *v, int size)
+{
+    saveLoadBegin();
+    int i= get(Preference->blobs, Preference->usedBlob, key); if (i<0) i= Preference->usedBlob++;
+    Preference->blobs[i].v[0]= size;
+    memcpy(Preference->blobs[i].v+1, v, size);
+    saveLoadHandleDirty = true;
+    saveLoadEnd();
+}
 void CAlpaca::save(char const* key, int32_t v)
 {
     saveLoadBegin();
@@ -1433,6 +1549,15 @@ char* CAlpaca::load(char const* key, char const* def, char* buf, size_t buflen)
     saveLoadEnd();
     return buf;
 }
+bool CAlpaca::load(char const *key, uint8_t *buf, size_t buflen) // load data in buf. return true if successful
+{
+    saveLoadBegin();
+    int i= get(Preference->blobs, Preference->usedBlob, key); 
+    if (i>=0 && Preference->texts[i].v[0]==buflen) memcpy(buf, Preference->texts[i].v+1, buflen);
+    saveLoadEnd();
+    return buf;
+}
+
 int32_t CAlpaca::load(char const* key, int32_t def)
 {
     saveLoadBegin();
@@ -1514,3 +1639,58 @@ bool DecToFloat(char const *b, float &ra) // return true if no error
     return coordToFloat(b, ra, -90.0f, 90.0f);
 }
 
+
+#ifndef _WIN32
+#include "esp_wifi.h"
+#include "esp_event.h"
+bool volatile wificonnected= false;
+char ipadr[30]="unknow";
+// Wifi stuff...
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) { esp_wifi_connect(); wificonnected= false; } 
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) 
+    {
+        esp_wifi_connect();
+        ESP_LOGI(TAG, "retry to connect to the AP");
+        wificonnected= false;
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) 
+    {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        sprintf(ipadr, IPSTR, IP2STR(&event->ip_info.ip));
+        wificonnected= true;
+    }
+}
+
+void startWifi(char const *net, char const *pass, char const *hostname)
+{
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) { ESP_ERROR_CHECK(nvs_flash_erase()); ret = nvs_flash_init(); }
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *netif= esp_netif_create_default_wifi_sta();
+    esp_netif_set_hostname(netif, hostname);
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &instance_got_ip));
+    wifi_config_t wifi_config; memset(&wifi_config, 0, sizeof(wifi_config));
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    memcpy(wifi_config.sta.ssid, net, strlen(net));
+    memcpy(wifi_config.sta.password, pass, strlen(pass));
+    wifi_config.sta.pmf_cfg.capable= true;
+    wifi_config.sta.pmf_cfg.required= false;
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+    if (strlen(net)!=0)
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    ESP_ERROR_CHECK(esp_wifi_start() );
+    ESP_LOGI(TAG, "wifi_init_sta finished.");
+}
+#endif

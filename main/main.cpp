@@ -41,47 +41,9 @@ class CMyFocuser : public CFocuser
     int32_t get_maxincrement() override { return MotorFocus.maxPos; }
     int32_t get_maxstep() override { return MotorFocus.maxPos; }
     int32_t get_position() override { return MotorFocus.pos; }
-    int32_t get_stepsize() override { return int32_t((MotorFocus.maxRealPos-MotorFocus.minRealPos)/MotorFocus.maxPos); }
+    float get_stepsize() override { return (MotorFocus.maxRealPos-MotorFocus.minRealPos)/MotorFocus.maxPos; }
     TAlpacaErr put_halt() override { MotorFocus.stop(); return ALPACA_OK; };
     TAlpacaErr put_move(int32_t position) override { MotorFocus.goToSteps(position); return ALPACA_OK; };
-    // This is the overload of the subLoad to get my init values from storage...
-    void subLoad(CAlpaca *alpaca) override
-    {
-        CFocuser::subLoad(alpaca);
-        MotorFocus.maxPos= alpaca->load(keyHeader, "maxPos", int32_t(MotorFocus.maxPos));
-        MotorFocus.maxSpeed= alpaca->load(keyHeader, "maxSpeed", int32_t(MotorFocus.maxSpeed));
-        MotorFocus.maxAcceleration= alpaca->load(keyHeader, "maxAcceleration", int32_t(MotorFocus.maxAcceleration));
-        MotorFocus.maxRealPos= alpaca->load(keyHeader, "maxRealPos", MotorFocus.maxRealPos);
-    }
-    // My setup web page adds configuration for the focusser settings...
-    void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override
-    {
-        if (data!=nullptr)
-        {   // This handles when the user changes the settings. It saves them to the motor and storage...
-            int v= getIntData(data,"FocMax"); if (v!=-1) alpaca->save(keyHeader, "maxPos", int32_t(MotorFocus.maxPos=v));
-            v= getIntData(data,"FocMaxSpd");  if (v!=-1) alpaca->save(keyHeader, "maxSpeed", int32_t(MotorFocus.maxSpeed=v));
-            v= getIntData(data,"FocAcc");     if (v!=-1) alpaca->save(keyHeader, "maxAcceleration", int32_t(MotorFocus.maxAcceleration=v));
-            v= getIntData(data,"FocStep");    if (v!=-1) alpaca->save(keyHeader, "maxRealPos", MotorFocus.maxRealPos=float(v));
-        }
-        CFocuser::subSetup(Alpaca, sock, get, data, s);
-        // Here I add the setup table in the html...
-        s.printf("<h1>Motor</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "<table align=\"center\">"
-            "  <tr><td align=\"right\"><label for=\"FocMax\">max steps:</label></td>"
-            "      <td><input type=\"text\" id=\"FocMax\" name=\"FocMax\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"FocMaxSpd\">Speed Steps/s:</label></td>"
-            "      <td><input type=\"text\" id=\"FocMaxSpd\" name=\"FocMaxSpd\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"FocAcc\">Time to full speed in ms:</label></td>"
-            "      <td><input type=\"text\" id=\"FocAcc\" name=\"FocAcc\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"FocStep\">focuser length in mm:</label></td>"
-            "      <td><input type=\"text\" id=\"FocStep\" name=\"FocStep\" value=\"%d\"></td>"
-            "</table>"
-            "<input type=\"submit\" value=\"Update\">"
-            "</form>",
-            get_type(), id,
-            get_position(), MotorFocus.maxSpeed, MotorFocus.maxAcceleration, int(MotorFocus.maxRealPos));
-    }
 };
 
 
@@ -124,63 +86,6 @@ protected:
 
     float declination() override { return MotorDec.posInReal(); }; // Returns the mount's declination.
     float rightascension() override { return MotorRa.posInReal(); }; // Returns the mount's right ascension coordinate.
-
-    // As in the focuser example, loads my config data from storage...
-    void subLoad(CAlpaca *alpaca) override
-    {
-        CTelescope::subLoad(alpaca);
-        MotorRa.maxPos= alpaca->load(keyHeader, "RAmaxPos", int32_t(MotorRa.maxPos));
-        MotorRa.maxSpeed= alpaca->load(keyHeader, "RAmaxSpeed", int32_t(MotorRa.maxSpeed));
-        MotorRa.maxAcceleration= alpaca->load(keyHeader, "RAmaxAcceleration", int32_t(MotorRa.maxAcceleration));
-        MotorDec.maxPos= alpaca->load(keyHeader, "DECmaxPos", int32_t(MotorDec.maxPos));
-        MotorDec.maxSpeed= alpaca->load(keyHeader, "DECmaxSpeed", int32_t(MotorDec.maxSpeed));
-        MotorDec.maxAcceleration= alpaca->load(keyHeader, "DECmaxAcceleration", int32_t(MotorDec.maxAcceleration));
-    }
-    // As in the focuser example, overrides the default html setup page creation to allow you to add functions to set the configuration!
-    void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override  // This allows you to add stuff in the HTML or handle inputs...
-    {
-        CTelescope::subSetup(Alpaca, sock, get, data, s);
-        if (data!=nullptr)
-        {   // used on http post to change parameters...
-            int v;
-            v= getIntData(data,"RaMax");    if (v!=-1) alpaca->save(keyHeader, "RAmaxPos", MotorRa.maxPos=v);
-            v= getIntData(data,"RaMaxSpd"); if (v!=-1) alpaca->save(keyHeader, "RAmaxSpeed", MotorRa.maxSpeed=v);
-            v= getIntData(data,"RaAcc");    if (v!=-1) alpaca->save(keyHeader, "RAmaxAcceleration", MotorRa.maxAcceleration=v);
-            
-            v= getIntData(data,"DecMax");    if (v!=-1) alpaca->save(keyHeader, "DECmaxPos", MotorDec.maxPos=v);
-            v= getIntData(data,"DecMaxSpd"); if (v!=-1) alpaca->save(keyHeader, "DECmaxSpeed", MotorDec.maxSpeed=v);
-            v= getIntData(data,"DecAcc");    if (v!=-1) alpaca->save(keyHeader, "DECmaxAcceleration", MotorDec.maxAcceleration=v);
-        }
-        // add the html for the setup to the being created page...
-        s.printf("<h1>Motors</h1>"
-            "<form action=\"/setup/v1/%s/%d/setup\">"
-            "<h2>RA Stepper</h2>"
-            "<table align=\"center\">"
-            "  <tr><td align=\"right\"><label for=\"RaMax\">Steps for 360deg:</label></td>"
-            "      <td><input type=\"text\" id=\"RaMax\" name=\"RaMax\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"RaMaxSpd\">Speed Steps/s:</label></td>"
-            "      <td><input type=\"text\" id=\"RaMaxSpd\" name=\"RaMaxSpd\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"RaAcc\">Time to full speed in ms:</label></td>"
-            "      <td><input type=\"text\" id=\"RaAcc\" name=\"RaAcc\" value=\"%d\"></td>"
-            "</table>"
-            "<h2>Declinaison Stepper</h2>"
-            "<table align=\"center\">"
-            "  <tr><td align=\"right\"><label for=\"DecMax\">Steps for 360deg:</label></td>"
-            "      <td><input type=\"text\" id=\"DecMax\" name=\"DecMax\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"DecMaxSpd\">Speed Steps/s:</label></td>"
-            "      <td><input type=\"text\" id=\"DecMaxSpd\" name=\"DecMaxSpd\" value=\"%d\"></td>"
-            "  <tr><td align=\"right\"><label for=\"DecAcc\">Time to full speed in ms:</label></td>"
-            "      <td><input type=\"text\" id=\"DecAcc\" name=\"DecAcc\" value=\"%d\"></td>"
-            "</table>"
-            "<input type=\"submit\" value=\"Update\">"
-            "</form>",
-
-            get_type(), id,
-            MotorRa.maxPos, MotorRa.maxSpeed, MotorRa.maxAcceleration, 
-            MotorDec.maxPos, MotorDec.maxSpeed, MotorDec.maxAcceleration);
-        s+= "</p>";
-    }
-
 };
 
 
