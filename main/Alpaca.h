@@ -12,9 +12,12 @@
 * class CMyFocuser : public CFocuser
 * { public:
 *     CMyFocuser(int id): CFocuser(id, "CdB Focuser Driver", "1", "CdB Alpaca Focuser", "Focuser for eqMount") { }
+*     bool get_absolute() override { return true; }
 *     bool get_ismoving() override { return MotorFocus.isMoving(); }
+*     int32_t get_maxincrement() override { return MotorFocus.maxPos; }
 *     int32_t get_maxstep() override { return MotorFocus.maxPos; }
 *     int32_t get_position() override { return MotorFocus.pos; }
+*     int32_t get_stepsize() override { return FocusStepum; }
 *     TAlpacaErr put_halt() override { MotorFocus.stop(); return ALPACA_OK; };
 *     TAlpacaErr put_move(int32_t position) override { MotorFocus.goToSteps(position); return ALPACA_OK; };
 * };
@@ -417,11 +420,11 @@ class CObservingConditions : public CAlpacaDevice { public: CObservingConditions
     virtual TAlpacaErr get_winddirection(float *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
     virtual TAlpacaErr get_windgust(float *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
     virtual TAlpacaErr get_windspeed(float *v) { *v= 0.0f; return ALPACA_ERR_NOT_IMPLEMENTED; }
-    virtual TAlpacaErr put_refresh() = 0;
-    virtual TAlpacaErr get_sensordescription(char const *sensorname, char const *&buf) = 0; // return a pointer to the description for the requested sensor... Typically the specs...
+    virtual TAlpacaErr put_refresh() = 0; // force a refresh of the data..
+    virtual TAlpacaErr get_sensordescription(char const *sensorname, char const *&buf) = 0; // return a pointer to the description for the requested sensor... Typically the specs... for each of the sensor used...
     virtual TAlpacaErr get_timesincelastupdate(float *timesincelastupdate) = 0;
     protected:
-        float averageperiod= 1.0f/24.0f/60.0f; // default is 1 minute..
+    float averageperiod= 1.0f/24.0f/60.0f; // default is 1 minute..
     char const *get_type() override { return "ObservingConditions"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
     void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
@@ -452,7 +455,7 @@ protected:
     float offset= 0.0f, targetposition= 0.0f;
     char const *get_type() override { return "Rotator"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
-    //void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
+    void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
 
 // This has never been tested and is only partially implemented (no setup)
@@ -462,7 +465,7 @@ class CSafetyMonitor : public CAlpacaDevice { public: CSafetyMonitor(int id, cha
 protected:
     char const *get_type() override { return "SafetyMonitor"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
-    //void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
+    void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
 
 // This has never been tested and is only partially implemented (no setup). Should you need it, contact me as it will not be long to write!
@@ -542,13 +545,17 @@ protected:
     }
     char const *get_type() override { return "Switch"; }
     bool dispatch(bool get, char const *url, char *m, CMyStr *s) override;
-    // void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
+    void subSetup(CAlpaca *Alpaca, int sock, bool get, char *data, CMyStr &s) override; // This allows you to add stuff in the HTML or handle inputs...
 };
+
+#ifdef HASMilisecondTime // These are concidered mandatory by Ascom
+    uint32_t Milisecond(); // Must be defined elsewhere! else do not def HASMilisecondTime
+#endif
 
 // This been tested and works :-) for once!
 class CTelescope : public CAlpacaDevice { 
     public: CTelescope(int id, char const* driverInfo, char const* driverVersion, char const* defaultName, char const* defaultDescription) : CAlpacaDevice(id, driverInfo, driverVersion, defaultName, defaultDescription) { }
-protected:
+
     uint32_t get_interfaceversion() override { return 4; }
     char const *get_type() override { return "Telescope"; }
 
@@ -652,8 +659,10 @@ protected:
         virtual TAlpacaErr get_utcdate(char *b) =0; // Returns the UTC date/time of the telescope's internal clock. b will be at least 20chrs... "8910-91-19T25:83:67Z"
         virtual TAlpacaErr set_utcdate(char const *b) =0; // Sets the UTC date/time of the telescope's internal clock.
     #else
+        uint64_t UTCTimeDelta= 0; // UTCdateTime = Milisecond()/1000 + UTCTimeDelta + 0h0:0 on jan 1 2024
         virtual TAlpacaErr get_utcdate(char* b);
         virtual TAlpacaErr set_utcdate(char const* b);
+        virtual void set_utcdate(uint32_t t) { UTCTimeDelta= t-Milisecond()/1000; } // t is the number of seconds since 0:0 utc jan 1 2024
     #endif
 
     virtual TAlpacaErr axisrates(int axis, char *b) { b[0]= 0; return ALPACA_ERR_ACTION_NOT_IMPLEMENTED; } // Returns the rates at which the telescope may be moved about the specified $Axis  returns [{"Maximum": 0,"Minimum": 0}] in b (b will be 30 chr long)

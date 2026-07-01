@@ -728,14 +728,12 @@ bool CTelescope::dispatch(bool get, char const *url, char *data, CMyStr *s)
     return CAlpacaDevice::dispatch(get, url, data, s);
 }
 #ifdef HASMilisecondTime  // define this if you have a function called Milisecond which will return a time counter in milisecond. This is used for UTCTime in CTelescope.
-uint32_t Milisecond(); // Must be defined elsewhere! else do not #def HASMilisecondTime
-static uint64_t UTCTimeDelta= 0;
 // format is: 2025-12-02T16:13:09.0146526Z
 static int8_t const dpm[]={31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 TAlpacaErr CTelescope::set_utcdate(char const* B) // Here we save the time given by the PC (accurate to 1s for the moment) and make a delta with our ms clock...
 {
     char b2[100]; getHtmlString(B, b2, int(sizeof(b2))); char const *b= b2;
-    int Y, M, D, h, m, s;
+    int Y, M, D, h, m, s, ms;
     if (!readInt(b, Y)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='-') return ALPACA_ERR_INVALID_VALUE; if (Y<2024 || Y>2099) return ALPACA_ERR_INVALID_VALUE; Y-=2024;
     if (!readInt(b, M)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='-') return ALPACA_ERR_INVALID_VALUE; if (M<1 || M>12) return ALPACA_ERR_INVALID_VALUE;
     if (!readInt(b, D)) return ALPACA_ERR_INVALID_VALUE; if (*b++!='T') return ALPACA_ERR_INVALID_VALUE; if (D<1 || D>31) return ALPACA_ERR_INVALID_VALUE;
@@ -745,7 +743,7 @@ TAlpacaErr CTelescope::set_utcdate(char const* B) // Here we save the time given
     h= h*3600+m*60+s;
     while (Y>=4) D+= 365*4+1, Y-=4; if (M>2 && Y==0) D++; while (Y>0) D+= 365, Y--;
     for (int i=0; i<M-1; i++) D+= dpm[i];
-    UTCTimeDelta= uint64_t(D)*24*3600+h-Milisecond()/1000;
+    set_utcdate(D*24*3600+h);
     return ALPACA_OK;
 }
 TAlpacaErr CTelescope::get_utcdate(char* b) // here we add our ms clock to the delta given by the PC and generate UTC time...
@@ -884,7 +882,7 @@ bool CCoverCalibrator::dispatch(bool get, char const *url, char *data, CMyStr *s
 // These is the http handeling for ObservingConditions.The basic dispatch for all commands
 bool CObservingConditions::dispatch(bool get, char const *url, char *data, CMyStr *s)
 {
-    float v= 0.0; 
+    float v= 0.0f; 
     if (get && strcmp(url, "averageperiod") == 0) return putErVal(s, get_averageperiod(&v), v);
     if (!get && strcmp(url, "averageperiod") == 0) return putEr(s, put_averageperiod(getFloatDataDef(data, "AveragePeriod")));
 
